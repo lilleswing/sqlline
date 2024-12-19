@@ -15,10 +15,14 @@ import java.io.ByteArrayOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import javax.script.ScriptEngineManager;
 
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -30,9 +34,27 @@ import static sqlline.SqlLineArgsTest.begin;
  * Test cases for prompt and right prompt.
  */
 public class PromptTest {
+  private static final String DEV_NULL = "/dev/null";
+  private SqlLine sqlLine;
+
+  private static int getJavaMajorVersion() {
+    final String javaVersion = System.getProperty("java.version");
+    return Integer.parseInt(javaVersion.split("\\.")[0]);
+  }
+
+  @BeforeEach
+  private void init() {
+    sqlLine = new SqlLine();
+    sqlLine.getOpts().setPropertiesFile(DEV_NULL);
+  }
+
+  @AfterEach
+  private void finish() {
+    sqlLine.setExit(true);
+  }
+
   @Test
   public void testPromptWithoutConnection() {
-    SqlLine sqlLine = new SqlLine();
     // default prompt
     assertThat(sqlLine.getPromptHandler().getPrompt().toAnsi(),
         is(BuiltInProperty.PROMPT.defaultValue()));
@@ -118,7 +140,6 @@ public class PromptTest {
   @Test
   public void testPromptWithNickname() {
     ByteArrayOutputStream os = new ByteArrayOutputStream();
-    SqlLine sqlLine = new SqlLine();
     try {
       final SqlLine.Status status =
           begin(sqlLine, os, false, "-e", "!set maxwidth 80");
@@ -150,7 +171,6 @@ public class PromptTest {
   @Test
   public void testPromptWithConnection() {
     ByteArrayOutputStream os = new ByteArrayOutputStream();
-    SqlLine sqlLine = new SqlLine();
     try {
       final SqlLine.Status status =
           begin(sqlLine, os, false, "-e", "!set maxwidth 80");
@@ -177,7 +197,6 @@ public class PromptTest {
 
   @Test
   public void testPromptWithSchema() {
-    SqlLine sqlLine = new SqlLine();
     sqlLine.getOpts().set(BuiltInProperty.PROMPT, "%u%S>");
 
     sqlLine.runCommands(new DispatchCallback(),
@@ -196,9 +215,18 @@ public class PromptTest {
     sqlLine.getDatabaseConnection().close();
   }
 
+  /** Tests the {@code promptscript} property.
+   *
+   * <p>Disabled on JDK 15 or higher, due to
+   * <a href="https://github.com/julianhyde/sqlline/issues/394">[SQLLINE-394]
+   * The `promptscript` property is broken on JDK 15 and higher</a>. */
   @Test
   public void testPromptScript() {
-    SqlLine sqlLine = new SqlLine();
+    Assumptions.assumeTrue(
+        !new ScriptEngineManager().getEngineFactories().isEmpty(),
+        "promptscript fails if there is no script engines; "
+            + "see ");
+
     sqlLine.getOpts().set(BuiltInProperty.PROMPT_SCRIPT, "'hel' + 'lo'");
 
     sqlLine.runCommands(new DispatchCallback(),
@@ -219,7 +247,11 @@ public class PromptTest {
 
   @Test
   public void testCustomPromptHandler() {
-    SqlLine sqlLine = new SqlLine();
+    sqlLine.runCommands(new DispatchCallback(),
+        "!prompthandler sqlline.extensions.CustomPromptHandler");
+    assertThat(sqlLine.getPromptHandler().getPrompt().toAnsi(),
+        is("my_app>"));
+
     sqlLine.runCommands(new DispatchCallback(),
         "!connect "
             + SqlLineArgsTest.ConnectionSpec.H2.url + " "

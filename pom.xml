@@ -10,7 +10,7 @@
   <groupId>sqlline</groupId>
   <artifactId>sqlline</artifactId>
   <packaging>jar</packaging>
-  <version>1.9.0-SNAPSHOT</version>
+  <version>1.13.0-SNAPSHOT</version>
   <name>sqlline</name>
   <description>Shell for issuing SQL to relational databases via JDBC</description>
   <url>https://github.com/julianhyde/sqlline</url>
@@ -25,27 +25,30 @@
     <top.dir>${project.basedir}</top.dir>
 
     <!-- The following list is sorted. -->
-    <checkstyle.version>8.20</checkstyle.version>
+    <checkstyle.version>9.0.1</checkstyle.version>
     <docbkx-maven-plugin.version>2.0.17</docbkx-maven-plugin.version>
-    <forbiddenapis.version>2.6</forbiddenapis.version>
-    <h2.version>1.4.197</h2.version>
-    <hamcrest.version>2.1</hamcrest.version>
-    <hsqldb.version>2.4.1</hsqldb.version>
-    <jline.version>3.10.0</jline.version>
-    <jmockit.version>1.46</jmockit.version>
-    <junit.version>5.4.2</junit.version>
-    <maven-assembly-plugin.version>3.1.1</maven-assembly-plugin.version>
-    <maven-checkstyle-plugin.version>3.0.0</maven-checkstyle-plugin.version>
+    <forbiddenapis.version>3.2</forbiddenapis.version>
+    <h2.version>2.1.210</h2.version>
+    <hamcrest.version>2.2</hamcrest.version>
+    <hsqldb.version>2.5.0</hsqldb.version>
+    <jline.version>3.21.0</jline.version>
+    <jmockit.version>1.49</jmockit.version>
+    <junit.version>5.8.1</junit.version>
+    <maven-assembly-plugin.version>3.3.0</maven-assembly-plugin.version>
+    <maven-checkstyle-plugin.version>3.1.2</maven-checkstyle-plugin.version>
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
-    <maven-dependency-plugin.version>3.1.1</maven-dependency-plugin.version>
-    <maven-enforcer-plugin.version>3.0.0-M2</maven-enforcer-plugin.version>
-    <maven-jar-plugin.version>3.1.1</maven-jar-plugin.version>
-    <maven-javadoc-plugin.version>3.0.1</maven-javadoc-plugin.version>
+    <maven-dependency-plugin.version>3.2.0</maven-dependency-plugin.version>
+    <maven-enforcer-plugin.version>3.0.0</maven-enforcer-plugin.version>
+    <maven-jar-plugin.version>3.2.0</maven-jar-plugin.version>
+    <maven-javadoc-plugin.version>3.3.1</maven-javadoc-plugin.version>
     <maven-javadoc-plugin.additionalOptions>-html5</maven-javadoc-plugin.additionalOptions>
-    <maven-gpg-plugin.version>1.6</maven-gpg-plugin.version>
-    <maven-surefire-plugin.version>2.22.1</maven-surefire-plugin.version>
+    <maven-gpg-plugin.version>3.0.1</maven-gpg-plugin.version>
+    <maven-project-info-reports-plugin.version>3.1.2</maven-project-info-reports-plugin.version>
+    <maven-site-plugin.version>3.9.1</maven-site-plugin.version>
+    <maven-surefire-plugin.version>3.0.0-M5</maven-surefire-plugin.version>
     <scott-data-hsqldb.version>0.1</scott-data-hsqldb.version>
+    <skip.docbkx>false</skip.docbkx>
   </properties>
 
   <licenses>
@@ -80,7 +83,7 @@
   <scm>
     <connection>scm:git:git://github.com/julianhyde/sqlline.git</connection>
     <developerConnection>scm:git:git@github.com:julianhyde/sqlline.git</developerConnection>
-    <url>https://github.com/julianhyde/sqlline/tree/master</url>
+    <url>https://github.com/julianhyde/sqlline/tree/main</url>
     <tag>HEAD</tag>
   </scm>
 
@@ -124,6 +127,7 @@
             </entity>
           </entities>
           <includes>manual.xml</includes>
+          <skip>${skip.docbkx}</skip>
         </configuration>
       </plugin>
       <plugin>
@@ -200,7 +204,7 @@
                   <version>[1.8,)</version>
                 </requireJavaVersion>
                 <requireMavenVersion>
-                  <version>[3.2.1,)</version>
+                  <version>[3.2.3,)</version>
                 </requireMavenVersion>
               </rules>
             </configuration>
@@ -215,6 +219,7 @@
           <additionalOptions>${maven-javadoc-plugin.additionalOptions}</additionalOptions>
           <show>public</show>
           <source>${maven.compiler.source}</source>
+          <detectJavaApiLink>false</detectJavaApiLink>
         </configuration>
         <executions>
           <execution>
@@ -241,7 +246,15 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-project-info-reports-plugin</artifactId>
-        <version>2.9</version>
+        <version>${maven-project-info-reports-plugin.version}</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-release-plugin</artifactId>
+        <configuration>
+          <localCheckout>true</localCheckout>
+          <pushChanges>false</pushChanges>
+        </configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -309,6 +322,11 @@
           </execution>
         </executions>
       </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-site-plugin</artifactId>
+        <version>${maven-site-plugin.version}</version>
+      </plugin>
     </plugins>
 
     <pluginManagement>
@@ -353,6 +371,11 @@
     <dependency>
       <groupId>org.jline</groupId>
       <artifactId>jline-builtins</artifactId>
+      <version>${jline.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.jline</groupId>
+      <artifactId>jline-console</artifactId>
       <version>${jline.version}</version>
     </dependency>
     <dependency>

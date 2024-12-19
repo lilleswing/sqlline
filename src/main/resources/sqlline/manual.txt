@@ -1,7 +1,7 @@
-SQLLine 1.8.0
+SQLLine 1.12.0
 
 Copyright © 2002, 2003, 2004, 2005 Marc Prud'hommeaux
-Copyright 2006-2019 Julian Hyde
+Copyright 2006-2021 Julian Hyde
 
 SQLLine Manual
 Introduction
@@ -41,7 +41,7 @@ dbinfo — Provide information about the current database
 describe
 describe — Describe a table
 dropall
-dropall — Drop all tables in the database
+dropall — Drop all tables in the database or in the schema
 exportedkeys
 exportedkeys — List exported foreign keys for a database
 go
@@ -50,6 +50,12 @@ help
 help — Display help information
 history
 history — Display the command history
+  -d Print timestamps for each event (default for !history)
+  -f Print full time date stamps in the US format
+  -E Print full time date stamps in the European format
+  -i Print full time date stamps in ISO8601 format
+  -n Suppresses command numbers
+  -r Reverses the order of the commands
 importedkeys
 importedkeys — List imported foreign keys for a database
 indexes
@@ -74,12 +80,18 @@ properties
 properties — Connect to the database defined in the specified properties file.
 quit
 quit — Exit SQLLine
+readonly
+readonly - Enable or disable readonly connection
 reconnect
 reconnect — Reconnect to the current database
 record
 record — Begin recording all output from SQL commands
 rehash
 rehash — Obtain a list of all tables and columns from the database
+rereadconfconnections
+rereadconfconnections — Reread file with saved connections
+resize
+resize — Reset max height/width based on terminal height/width
 rollback
 rollback — Roll back the current transaction
 run
@@ -88,10 +100,16 @@ save
 save — Save the current preferences
 scan
 scan — Scan class path for JDBC drivers
+schemas
+schemas — List all the schemas in the database
 script
 script — Save executed commands to a file
+scriptengine
+scriptengine - script engine name
 set
 set — Set a preference
+showconfconnections
+showconfconnections — Show connections from the file
 sql
 sql — Execute a SQL against a database
 tables
@@ -115,6 +133,8 @@ headerinterval
 historyfile
 incremental
 isolation
+keepSemicolon
+liveTemplates
 maxcolumnwidth
 maxHistoryFileRows
 maxHistoryRows
@@ -129,6 +149,7 @@ rowlimit
 showheader
 shownestederrs
 showtime
+showtypes
 showwarnings
 strictJdbc
 silent
@@ -180,7 +201,7 @@ dbinfo — Provide information about the current database
 describe
 describe — Describe a table
 dropall
-dropall — Drop all tables in the database
+dropall — Drop all tables in the database or in the schema
 exportedkeys
 exportedkeys — List exported foreign keys for a database
 go
@@ -189,6 +210,12 @@ help
 help — Display help information
 history
 history — Display the command history
+  -d Print timestamps for each event (default for !history)
+  -f Print full time date stamps in the US format
+  -E Print full time date stamps in the European format
+  -i Print full time date stamps in ISO8601 format
+  -n Suppresses command numbers
+  -r Reverses the order of the commands
 importedkeys
 importedkeys — List imported foreign keys for a database
 indexes
@@ -217,18 +244,28 @@ record
 record — Begin recording all output from SQL commands
 rehash
 rehash — Obtain a list of all tables and columns from the database
+rereadconfconnections
+rereadconfconnections — Reread file with saved connections
+resize
+resize — Reset max height/width based on terminal height/width
 rollback
 rollback — Roll back the current transaction
 run
 run — Execute a command script
 save
 save — Save the current preferences
+schemas
+schemas — List all the schemas in the database
 scan
 scan — Scan class path for JDBC drivers
 script
 script — Save executed commands to a file
+scriptengine
+scriptengine - script engine name
 set
 set — Set a preference
+showconfconnections
+showconfconnections — Show connections from the file
 sql
 sql — Execute a SQL against a database
 tables
@@ -252,6 +289,8 @@ headerinterval
 historyfile
 incremental
 isolation
+keepSemicolon
+liveTemplates
 maxcolumnwidth
 maxHistoryFileRows
 maxHistoryRows
@@ -264,6 +303,7 @@ prompt
 rightprompt
 rowlimit
 showheader
+showtypes
 shownestederrs
 showtime
 showwarnings
@@ -407,7 +447,7 @@ dbinfo — Provide information about the current database
 describe
 describe — Describe a table
 dropall
-dropall — Drop all tables in the database
+dropall — Drop all tables in the database or in the schema
 exportedkeys
 exportedkeys — List exported foreign keys for a database
 go
@@ -416,6 +456,12 @@ help
 help — Display help information
 history
 history — Display the command history
+  -d Print timestamps for each event (default for !history)
+  -f Print full time date stamps in the US format
+  -E Print full time date stamps in the European format
+  -i Print full time date stamps in ISO8601 format
+  -n Suppresses command numbers
+  -r Reverses the order of the commands
 importedkeys
 importedkeys — List imported foreign keys for a database
 indexes
@@ -444,18 +490,28 @@ record
 record — Begin recording all output from SQL commands
 rehash
 rehash — Obtain a list of all tables and columns from the database
+rereadconfconnections
+rereadconfconnections — Reread file with saved connections
+resize
+resize — Reset max height/width based on terminal height/width
 rollback
 rollback — Roll back the current transaction
 run
 run — Execute a command script
 save
 save — Save the current preferences
+schemas
+schemas — List all the schemas in the database
 scan
 scan — Scan class path for JDBC drivers
 script
 script — Save executed commands to a file
+scriptengine
+scriptengine - script engine name
 set
 set — Set a preference
+showconfconnections
+showconfconnections — Show connections from the file
 sql
 sql — Execute a SQL against a database
 tables
@@ -641,7 +697,8 @@ columns
 
 Name
 
-columns — Display columns of a table
+columns — List the columns in the specified schema, table,
+table name pattern, column name pattern.
 
 Synopsis
 
@@ -958,11 +1015,11 @@ dropall
 
 Name
 
-dropall — Drop all tables in the database
+dropall — Drop all tables in the database or in the schema
 
 Synopsis
 
-!dropall
+!dropall [schema_pattern]
 
 Description
 
@@ -1080,6 +1137,12 @@ sqlline> !help
 !go                 Select the current connection
 !help               Print a summary of command usage
 !history            Display the command history
+                    -d Print timestamps for each event (default for !history)
+                    -f Print full time date stamps in the US format
+                    -E Print full time date stamps in the European format
+                    -i Print full time date stamps in ISO8601 format
+                    -n Suppresses command numbers
+                    -r Reverses the order of the commands
 !importedkeys       List all the imported keys for the specified table
 !indexes            List all the indexes for the specified table
 !isolation          Set the transaction isolation for this connection
@@ -1090,7 +1153,7 @@ sqlline> !help
 !nickname           Create a friendly name for the connection (updates command
                     prompt)
 !outputformat       Set the output format for displaying results (table,
-                    vertical, csv, tsv, xmlattrs, xmlelements, json)
+                    vertical, csv, tsv, xmlattrs, xmlelements, json, ansiconsole)
 !primarykeys        List all the primary keys for the specified table
 !procedures         List all the procedures
 !prompthandler      Set custom prompt handler class name
@@ -1099,12 +1162,16 @@ sqlline> !help
 !reconnect          Reconnect to the database
 !record             Record all output to the specified file
 !rehash             Fetch table and column names for command completion
+!rereadconfconnections Reread file with saved connections
+!resize             Reset max height/width based on terminal height/width
 !rollback           Roll back the current transaction (if autocommit is off)
 !run                Run a script from the specified file
 !save               Save the current variables and aliases
+!schemas            List all the schemas in the database
 !scan               Scan for installed JDBC drivers
 !script             Start saving a script to a file
 !set                Set a sqlline variable
+!showconfconnections Show connections from the file
 !sql                Execute a SQL command
 !tables             List all the tables in the database
 !typeinfo           Display the type map for the current connection
@@ -1118,7 +1185,7 @@ Variable        Value      Description
 autoCommit      true/false Enable/disable automatic transaction commit
 autoSave        true/false Automatically save preferences
 color           true/false Control whether color is used for display
-colorScheme     chester/dark/dracula/light/obsidian/solarized/vs2010
+colorScheme     chester/dark/dracula/geshi/light/obsidian/solarized/vs2010
                            Syntax highlight schema
 confirm         true/false Prompts for confirmation before running
                            commands specified in confirmPattern
@@ -1140,6 +1207,8 @@ incremental     true/false Do not receive all rows from server before
 incrementalBufferRows integer Enter incremental mode if a query returns more
                               than "incrementalBufferRows".
 isolation       LEVEL      Set transaction isolation level
+keepSemicolon   true/false Keep semicolon in queries
+liveTemplates   path       File with live templates
 maxColumnWidth  integer    The maximum width to use when displaying columns
 maxHeight       integer    The maximum height of the terminal
 maxWidth        integer    The maximum width of the terminal
@@ -1150,7 +1219,7 @@ maxHistoryRows  integer    The maximum number of history rows
 mode            emacs/vi   The editing mode
 nullValue       String     Use String in place of  NULL values
 numberFormat    pattern    Format numbers using DecimalFormat pattern
-outputFormat    table/vertical/csv/tsv/xmlattrs/xmlelements/json
+outputFormat    table/vertical/csv/tsv/xmlattrs/xmlelements/json/ansiconsole
                            Format mode for result display
 prompt          pattern    Format prompt
 propertiesFile  path       File from which SQLLine reads properties on
@@ -1160,12 +1229,17 @@ propertiesFile  path       File from which SQLLine reads properties on
 rightPrompt     pattern    Format right prompt
 rowLimit        integer    Maximum number of rows returned from a query; zero
                            means no limit
+scriptEngine    string     Script engine name
+showCompletionDesc true/false Display help for completions
 showElapsedTime true/false Display execution time when verbose
 showHeader      true/false Show column names in query results
 showNestedErrs  true/false Display nested errors
+showTypes       true/false Display column types
 showWarnings    true/false Display connection warnings
 silent          true/false Be more silent
 strictJdbc      true/false Use strict JDBC
+tableStyle      default/solid/double_solid/round_corners/bold_header
+                           Table output style
 timeFormat      pattern    Format times using SimpleDateFormat pattern
 timeout         integer    Query timeout in seconds; less than zero means no
                            timeout
@@ -1214,7 +1288,12 @@ history
 Name
 
 history — Display the command history
-
+  -d Print timestamps for each event (default for !history)
+  -f Print full time date stamps in the US format
+  -E Print full time date stamps in the European format
+  -i Print full time date stamps in ISO8601 format
+  -n Suppresses command numbers
+  -r Reverses the order of the commands
 Synopsis
 
 !history
@@ -1271,6 +1350,7 @@ indexes — Display indexes for a table
 Synopsis
 
 !indexes {table name}
+!indexes {schema_name} {table_name} {unique} {approximate}
 
 Description
 
@@ -1522,11 +1602,23 @@ Example of JSON output formatting
 4 rows selected (0.03 seconds)
 0: jdbc:calcite:model=target/test-classes/mod>
 
+Example of AnsiConsole output formatting
+
+0: jdbc:calcite:model=target/test-classes/mod> !outputformat ansiconsole
+0: jdbc:calcite:model=target/test-classes/mod> SELECT * FROM COMPANY;
+COMPANY_ID NAME
+1          Apple
+2          Sun
+3          IBM
+4          Microsoft
+4 rows selected (0.03 seconds)
+0: jdbc:calcite:model=target/test-classes/mod>
+
 primarykeys
 
 Name
 
-primarykeys — Display the primary key columns for a table
+primarykeys — Display the primary key columns for a schema, table
 
 Synopsis
 
@@ -1732,6 +1824,36 @@ Caution
 
 This operation can be extremely slow for some databases.
 
+rehash
+
+Name
+
+rereadconfconnections — Reread file with saved connections
+
+Synopsis
+
+!rereadconfconnections {filename}
+
+Description
+
+Reread file with saved connections
+
+Name
+
+resize — Reset max height/width based on terminal height/width
+
+Synopsis
+
+!resize
+
+Description
+
+Resets max height/width based on terminal height/width
+
+Example of "resize" command
+
+0: jdbc:hsqldb:db-hypersonic> !resize
+
 rollback
 
 Name
@@ -1921,6 +2043,34 @@ yes       0.9     org.sourceforge.jxdbcon.JXDBConDriver
 
 sqlline>
 
+schemas
+
+Name
+
+schemas — List all the schemas in the database
+
+Synopsis
+
+!schemas
+
+Description
+
+List all the schemas in the database of the current connection.
+
+Example of "schemas" command
+
+0: jdbc:postgresql:thin:@localhost:5432:mydb> !schemas
+
++--------------------+---------------+
+|    table_schem     | table_catalog |
++--------------------+---------------+
+| information_schema |               |
+| pg_catalog         |               |
+| public             |               |
++--------------------+---------------+
+
+0: jdbc:postgresql:thin:@localhost:5432:mydb>
+
 script
 
 Name
@@ -1989,6 +2139,18 @@ Example of "set" command
 
 0: jdbc:hsqldb:db-hypersonic> !set color on
 
+Name
+
+showconfconnections — Show connections from the file
+
+Synopsis
+
+!showconfconnections
+
+Description
+
+Show connections from the file
+
 sql
 
 Name
@@ -2015,7 +2177,7 @@ tables
 
 Name
 
-tables — List all the tables in the database
+tables — List all the tables in the database, schema, by pattern
 
 Synopsis
 
@@ -2100,6 +2262,8 @@ headerinterval
 historyfile
 incremental
 isolation
+keepSemicolon
+liveTemplates
 maxcolumnwidth
 maxHistoryFileRows
 maxHistoryRows
@@ -2114,9 +2278,11 @@ rowlimit
 showheader
 shownestederrs
 showtime
+showtypes
 showwarnings
 silent
 strictJdbc
+tableStyle
 timeformat
 timestampformat
 trimscripts
@@ -2136,7 +2302,7 @@ If true, then output to the terminal will use color for a more pleasing visual e
 
 colorScheme
 
-If chester/dark/dracula/light/obsidian/solarized/vs2010, then this scheme will be used for command/sql syntax highlighting. If default then there is no syntax highlighting.
+If chester/dark/dracula/geshi/light/obsidian/solarized/vs2010, then this scheme will be used for command/sql syntax highlighting. If default then there is no syntax highlighting.
 
 confirm
 
@@ -2189,6 +2355,14 @@ When incremental set to false and the entire result set has more rows than value
 isolation
 
 The default transaction isolation that will be used for new connections. To change the isolation level of the currently active connection, use the isolation command instead.
+
+keepSemicolon
+
+When set to true, semicolon at the end of queries will not be removed before. Defaults to false.
+
+liveTemplates
+
+The file containing a list of live templates. Defaults to empty.
 
 maxcolumnwidth
 
@@ -2244,6 +2418,10 @@ rowlimit
 
 The maximum number of rows to fetch per query. Defaults to 0, which is interpreted as fetching all rows.
 
+scriptengine
+
+A script engine to use to evaluate scripts for instance from promptScript. Defaults to nashorn.
+
 showheader
 
 If true, display the names of the columns when displaying results. Defaults to true.
@@ -2256,6 +2434,10 @@ showtime
 
 If true, display execution time for database commands when in verbose mode. Defaults to true.
 
+showtypes
+
+If true and showheader is true, display the types of the columns when displaying results. Defaults to true.
+
 showwarnings
 
 If true, display any warnings that are reported on the connection after issuing any database commands. Defaults to true.
@@ -2267,6 +2449,10 @@ If true, then reduce the amount of informational messages displayed. Useful for 
 strictJdbc
 
 If false, then use default values defined by java.sql.DatabaseMetaData in case an implementation of this interface fails with e.g. "Method not supported", otherwise it also fails. Defaults to false.
+
+tableStyle
+
+The style of tables used to output data for table output format.
 
 timeformat
 

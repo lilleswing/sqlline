@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -26,6 +27,8 @@ import java.util.Properties;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.TreeSet;
+import javax.script.ScriptEngineFactory;
+import javax.script.ScriptEngineManager;
 
 import org.jline.builtins.Completers.FileNameCompleter;
 import org.jline.reader.Completer;
@@ -50,6 +53,7 @@ public class Application {
 
   private static final String[] CONNECTION_URLS = {
       "jdbc:JSQLConnect://<hostname>/database=<database>",
+      "jdbc:clickhouse://<host>:<port>[/<database>]",
       "jdbc:cloudscape:<database>;create=true",
       "jdbc:twtds:sqlserver://<hostname>/<database>",
       "jdbc:daffodilDB_embedded:<database>;create=true",
@@ -62,6 +66,14 @@ public class Application {
       "jdbc:datadirect:sybase://<hostname>:5000",
       "jdbc:db2://<hostname>/<database>",
       "jdbc:hsqldb:<database>",
+      "jdbc:hive2://<hostname>:<port>/<database>",
+      "jdbc:hive2://<hostname>:<port>/<database>;"
+          + "transportMode=http;"
+          + "httpPath=<http_endpoint>",
+      "jdbc:hive2://<hostname>:<port>/<database>;"
+          + "ssl=true;"
+          + "sslTrustStore=<trust_store_path>;"
+          + "trustStorePassword=<trust_store_password>",
       "jdbc:idb:<database>.properties",
       "jdbc:informix-sqli://<hostname>:1526/<database>:INFORMIXSERVER=<database>",
       "jdbc:interbase://<hostname>//<database>.gdb",
@@ -99,6 +111,15 @@ public class Application {
 
   private static final List<String> ISOLATION_LEVEL_LIST =
       Collections.unmodifiableList(Arrays.asList(ISOLATION_LEVELS));
+
+  private static final String[] CONNECT_MODES = {
+      "askCredentials",
+      "notAskCredentials",
+      "useNPTogetherOrEmpty",
+  };
+
+  private static final List<String> CONNECT_INTERACTIVE_MODES =
+      Collections.unmodifiableList(Arrays.asList(CONNECT_MODES));
 
   /** Creates an Application. */
   public Application() {
@@ -181,6 +202,7 @@ public class Application {
     final Map<String, OutputFormat> outputFormats = new HashMap<>();
     outputFormats.put("vertical", new VerticalOutputFormat(sqlLine));
     outputFormats.put("table", new TableOutputFormat(sqlLine));
+    outputFormats.put("ansiconsole", new AnsiConsoleOutputFormat(sqlLine));
     outputFormats.put("csv", new SeparatedValuesOutputFormat(sqlLine, ","));
     outputFormats.put("tsv", new SeparatedValuesOutputFormat(sqlLine, "\t"));
     XmlAttributeOutputFormat xmlAttrs = new XmlAttributeOutputFormat(sqlLine);
@@ -231,6 +253,9 @@ public class Application {
         new ReflectiveCommandHandler(sqlLine,
             new StringsCompleter(getConnectionUrlExamples()), "connect",
             "open"),
+        new ReflectiveCommandHandler(sqlLine, empty, "showconfconnections"),
+        new ReflectiveCommandHandler(sqlLine, new FileNameCompleter(),
+           "rereadconfconnections"),
         new ReflectiveCommandHandler(sqlLine, empty, "nickname"),
         new ReflectiveCommandHandler(sqlLine, tableCompleter, "describe"),
         new ReflectiveCommandHandler(sqlLine, tableCompleter, "indexes"),
@@ -239,6 +264,7 @@ public class Application {
         new ReflectiveCommandHandler(sqlLine, empty, "manual"),
         new ReflectiveCommandHandler(sqlLine, tableCompleter, "importedkeys"),
         new ReflectiveCommandHandler(sqlLine, empty, "procedures"),
+        new ReflectiveCommandHandler(sqlLine, empty, "schemas"),
         new ReflectiveCommandHandler(sqlLine, empty, "tables"),
         new ReflectiveCommandHandler(sqlLine, empty, "typeinfo"),
         new ReflectiveCommandHandler(sqlLine, empty, "commandhandler"),
@@ -251,12 +277,14 @@ public class Application {
         new ReflectiveCommandHandler(sqlLine, empty, "nativesql"),
         new ReflectiveCommandHandler(sqlLine, empty, "dbinfo"),
         new ReflectiveCommandHandler(sqlLine, empty, "rehash"),
+        new ReflectiveCommandHandler(sqlLine, empty, "resize"),
         new ReflectiveCommandHandler(sqlLine, empty, "verbose"),
         new ReflectiveCommandHandler(sqlLine, new FileNameCompleter(), "run"),
         new ReflectiveCommandHandler(sqlLine, empty, "batch"),
         new ReflectiveCommandHandler(sqlLine, empty, "list"),
         new ReflectiveCommandHandler(sqlLine, empty, "all"),
-        new ReflectiveCommandHandler(sqlLine, empty, "go", "#"),
+        new ReflectiveCommandHandler(sqlLine,
+            new ConnectionCompleter(sqlLine), "go", "#"),
         new ReflectiveCommandHandler(sqlLine, new FileNameCompleter(),
             "script") {
           @Override public boolean echoToFile() {
@@ -273,11 +301,13 @@ public class Application {
         new ReflectiveCommandHandler(sqlLine,
             new StringsCompleter(outputFormats.keySet()), "outputformat"),
         new ReflectiveCommandHandler(sqlLine, empty, "autocommit"),
+        new ReflectiveCommandHandler(sqlLine, empty, "readonly"),
         new ReflectiveCommandHandler(sqlLine, empty, "commit"),
         new ReflectiveCommandHandler(sqlLine, new FileNameCompleter(),
             "properties"),
         new ReflectiveCommandHandler(sqlLine, empty, "rollback"),
-        new ReflectiveCommandHandler(sqlLine, empty, "help", "?"),
+        new ReflectiveCommandHandler(sqlLine,
+                () -> getOpts(sqlLine).helpCompleters(), "help", "?"),
         new ReflectiveCommandHandler(sqlLine,
             getOpts(sqlLine).setOptionCompleters(customPropertyCompletions),
             "set"),
@@ -334,6 +364,50 @@ public class Application {
 
   public Map<String, HighlightStyle> getName2HighlightStyle() {
     return BuiltInHighlightStyle.BY_NAME;
+  }
+
+  public Collection<String> getConnectInteractiveModes() {
+    return CONNECT_INTERACTIVE_MODES;
+  }
+
+  public String getDefaultInteractiveMode() {
+    return "askCredentials";
+  }
+
+  public Map<String, TableOutputFormatStyle> getName2TableOutputFormatStyle() {
+    return BuiltInTableOutputFormatStyles.BY_NAME;
+  }
+
+  /**
+   * Override this method to modify available script engine names.
+   *
+   * <p>If method is not overridden, current set of engine names will
+   * contain first non intersected values (ordered by abc).
+   *
+   * @return Set of available script engine names
+   */
+  public Set<String> getAvailableScriptEngineNames() {
+    final Set<String> result = new HashSet<>();
+    final Map<String, Set<String>> fName2Aliases = new HashMap<>();
+    final List<ScriptEngineFactory> factories =
+        new ScriptEngineManager().getEngineFactories();
+    for (ScriptEngineFactory factory: factories) {
+      fName2Aliases.put(factory.getEngineName(),
+          new HashSet<>(factory.getNames()));
+    }
+    for (Map.Entry<String, Set<String>> fEntry: fName2Aliases.entrySet()) {
+      Set<String> aliases = new TreeSet<>(fEntry.getValue());
+      for (Map.Entry<String, Set<String>> fEntry2: fName2Aliases.entrySet()) {
+        if (fEntry.getKey().equals(fEntry2.getKey())) {
+          continue;
+        }
+        aliases.removeAll(fEntry2.getValue());
+      }
+      if (!aliases.isEmpty()) {
+        result.add(aliases.iterator().next());
+      }
+    }
+    return result;
   }
 }
 

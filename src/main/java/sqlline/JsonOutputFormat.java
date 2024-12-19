@@ -29,19 +29,20 @@ public class JsonOutputFormat extends AbstractOutputFormat {
 
   @Override void printFooter(Rows.Row header) {
     sqlLine.output("]}");
+    columnTypes = null;
   }
 
   @Override void printRow(Rows rows, Rows.Row header, Rows.Row row) {
     String[] head = header.values;
     String[] vals = row.values;
     StringBuilder sb = new StringBuilder("{");
-    for (int i = 0; (i < head.length) && (i < vals.length); i++) {
+    for (int i = 0; i < head.length && i < vals.length; i++) {
       if (columnTypes == null) {
         initColumnTypes(rows, header);
       }
       sb.append("\"").append(head[i]).append("\":");
       setJsonValue(sb, vals[i], columnTypes[i]);
-      sb.append((i < head.length - 1) && (i < vals.length - 1) ? "," : "");
+      sb.append(i < head.length - 1 && i < vals.length - 1 ? "," : "");
     }
     sb.append(rows.hasNext() ? "}," : "}");
     sqlLine.output(sb.toString());

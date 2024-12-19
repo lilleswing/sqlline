@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/julianhyde/sqlline.png)](https://travis-ci.org/julianhyde/sqlline)
+[![CI](https://github.com/julianhyde/sqlline/actions/workflows/ci.yml/badge.svg)](https://github.com/julianhyde/sqlline/actions/workflows/ci.yml)
 
 Command-line shell for issuing SQL to relational databases via JDBC.
 
@@ -21,13 +21,16 @@ almost no restrictions.
 It is distributed via the
 [Maven Central Repository](https://search.maven.org/#search%7Cga%7C1%7Csqlline).
 
+## Demos
+[demos](https://github.com/julianhyde/sqlline/wiki/Demos)
+
 ## Quick start
 
 If you have [Coursier](https://github.com/coursier/coursier) installed, you
 can quickly connect to a [demo Hypersonic database](https://github.com/julianhyde/foodmart-data-hsqldb) with:
 
 ```
-$ coursier launch sqlline:sqlline:1.8.0 org.hsqldb:hsqldb:2.4.1 net.hydromatic:foodmart-data-hsqldb:0.4 -M sqlline.SqlLine -- -u jdbc:hsqldb:res:foodmart -n FOODMART -p FOODMART -d org.hsqldb.jdbcDriver
+$ coursier launch sqlline:sqlline:1.12.0 org.hsqldb:hsqldb:2.5.0 net.hydromatic:foodmart-data-hsqldb:0.4 -M sqlline.SqlLine -- -u jdbc:hsqldb:res:foodmart -n FOODMART -p FOODMART -d org.hsqldb.jdbcDriver
 0: jdbc:hsqldb:res:foodmart> select avg("shelf_height" * "shelf_width" * "shelf_depth") as "avg_volume" from "product";
 +-------------------------+
 |       avg_volume        |
@@ -116,23 +119,22 @@ Use the following definition to use `sqlline` in your maven project:
 <dependency>
   <groupId>sqlline</groupId>
   <artifactId>sqlline</artifactId>
-  <version>1.8.0</version>
+  <version>1.12.0</version>
 </dependency>
 ```
 
 ## Building
 
-Prerequisites:
-
-* Maven 3.2.5 or higher
-* Java 8 or higher (12 preferred)
+To build or run SQLLine, you need Java 8 or higher.
+(When running on Java 15 and higher, you will need to
+[set `scriptEngine` before you use `promptscript`](https://github.com/julianhyde/sqlline/issues/394).)
 
 Check out and build:
 
 ```bash
 git clone git://github.com/julianhyde/sqlline.git
 cd sqlline
-mvn package
+./mvnw package
 ```
 
 ## Committers
@@ -142,9 +144,9 @@ mvn package
 * [Joe Posner](https://github.com/joeposner)
 * John Pham
 * [John V. Sichi](https://github.com/jsichi)
-* [Julian Hyde](https://github.com/julianhyde)
+* [Julian Hyde](https://github.com/julianhyde) (PMC)
 * [Marc Prud'hommeaux](https://github.com/marcprux)
-* [Sergey Nuyanzin](https://github.com/snuyanzin)
+* [Sergey Nuyanzin](https://github.com/snuyanzin) (PMC Chair)
 * [Stephan Zuercher](https://github.com/zuercher)
 * Steve Herskovitz
 * Sunny Choi

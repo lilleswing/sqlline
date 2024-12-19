@@ -23,8 +23,10 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Properties;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.h2.util.StringUtils;
 import org.hamcrest.BaseMatcher;
@@ -37,8 +39,19 @@ import org.hsqldb.jdbc.JDBCDatabaseMetaData;
 import org.hsqldb.jdbc.JDBCResultSet;
 import org.hsqldb.jdbc.JDBCResultSetMetaData;
 import org.jline.builtins.Commands;
+import org.jline.reader.LineReader;
+import org.jline.reader.LineReaderBuilder;
+import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
+import org.jline.terminal.impl.DumbTerminal;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import mockit.Expectations;
 import mockit.Mock;
@@ -51,16 +64,30 @@ import sqlline.extensions.CustomApplication;
 import static org.hamcrest.CoreMatchers.*;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.params.provider.Arguments.of;
 
 /**
  * Executes tests of the command-line arguments to SqlLine.
  */
 public class SqlLineArgsTest {
   private static final ConnectionSpec CONNECTION_SPEC = ConnectionSpec.HSQLDB;
+  private static final String DEV_NULL = "/dev/null";
   private ConnectionSpec connectionSpec;
+  private SqlLine sqlLine;
 
   public SqlLineArgsTest() {
     connectionSpec = CONNECTION_SPEC;
+  }
+
+  @BeforeEach
+  void init() {
+    sqlLine = new SqlLine();
+    sqlLine.getOpts().setPropertiesFile(DEV_NULL);
+  }
+
+  @AfterEach
+  void finish() {
+    sqlLine.setExit(true);
   }
 
   static SqlLine.Status begin(SqlLine sqlLine, OutputStream os,
@@ -83,11 +110,10 @@ public class SqlLineArgsTest {
    * @return The stderr and stdout from running the script
    * @param args Script arguments
    */
-  private static Pair run(String... args) {
+  private Pair run(String... args) {
     try {
-      SqlLine beeLine = new SqlLine();
       ByteArrayOutputStream os = new ByteArrayOutputStream();
-      SqlLine.Status status = begin(beeLine, os, false, args);
+      SqlLine.Status status = begin(sqlLine, os, false, args);
       return new Pair(status, os.toString("UTF8"));
     } catch (Throwable t) {
       // fail
@@ -99,7 +125,7 @@ public class SqlLineArgsTest {
     return runScript(connectionSpec, scriptFile, flag, outputFileName);
   }
 
-  private static Pair runScript(ConnectionSpec connectionSpec, File scriptFile,
+  private Pair runScript(ConnectionSpec connectionSpec, File scriptFile,
       boolean flag, String outputFileName) {
     List<String> args = new ArrayList<>();
     Collections.addAll(args,
@@ -117,7 +143,9 @@ public class SqlLineArgsTest {
       args.add("-log");
       args.add(outputFileName);
     }
-    return run(args.toArray(new String[0]));
+    final Pair result = run(args.toArray(new String[0]));
+    sqlLine.getOpts().setRun(null);
+    return result;
   }
 
   /**
@@ -176,6 +204,26 @@ public class SqlLineArgsTest {
     } catch (IOException e) {
       // fail
       throw new RuntimeException(e);
+    }
+  }
+
+  /**
+   * Tests behavior in case of wrong input arguments.
+   * Test case for
+   * <a href="https://github.com/julianhyde/sqlline/issues/462">[SQLLINE-462]
+   * StringIndexOutOfBoundsException for wrong input arguments</a>.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"--", "--bad-argument", "--wrong--argument--"})
+  public void testWrongInputArguments(String args) {
+    try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
+      SqlLine.Status status = begin(sqlLine, os, false, args);
+      assertThat(status, equalTo(SqlLine.Status.ARGS));
+      sqlLine.runCommands(new DispatchCallback(), "!quit");
+      assertTrue(sqlLine.isExit());
+    } catch (Throwable t) {
+      // fail
+      throw new RuntimeException(t);
     }
   }
 
@@ -293,8 +341,7 @@ public class SqlLineArgsTest {
 
   @Test
   public void testScriptWithMultilineStatementsInARow() {
-    final String scriptText = "!set incremental false\n"
-        + "--comment\n\n"
+    final String scriptText = "--comment\n\n"
         + "values 1;values 2;";
     checkScriptFile(scriptText, true,
         equalTo(SqlLine.Status.OK),
@@ -313,8 +360,7 @@ public class SqlLineArgsTest {
 
   @Test
   public void testScriptWithMultilineStatementsAndCommentsInARow() {
-    final String scriptText = "!set incremental false\n"
-        + "--comment;;\n\n"
+    final String scriptText = "--comment;;\n\n"
         + "select * from (values ';') t (\";\");/*;select 1;*/values 2;";
     checkScriptFile(scriptText, true,
         equalTo(SqlLine.Status.OK),
@@ -335,7 +381,6 @@ public class SqlLineArgsTest {
    */
   @Test
   public void testMultilineScriptWithH2Comments() {
-    final SqlLine sqlLine = new SqlLine();
     try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
       final File tmpHistoryFile = createTempFile("queryToExecute", "temp");
       try (BufferedWriter bw =
@@ -345,6 +390,7 @@ public class SqlLineArgsTest {
         final String script = "\n"
             + "\n"
             + "!set incremental true\n"
+            + "!set maxColumnWidth 10\n"
             + "\n"
             + "\n"
             + "select * from information_schema.tables// ';\n"
@@ -359,11 +405,12 @@ public class SqlLineArgsTest {
           begin(sqlLine, os, false,
               "-u", ConnectionSpec.H2.url,
               "-n", ConnectionSpec.H2.username,
+              "-p", ConnectionSpec.H2.password,
               "--run=" + tmpHistoryFile.getAbsolutePath());
       assertThat(status, equalTo(SqlLine.Status.OK));
       String output = os.toString("UTF8");
-      final String expected = "| TABLE_CATALOG | TABLE_SCHEMA |"
-          + " TABLE_NAME | TABLE_TYPE | STORAGE_TYPE | SQL  |";
+      final String expected = "| UNNAMED    |"
+          + " INFORMATION_SCHEMA | ENUM_VALUES | BASE TABLE";
       assertThat(output, containsString(expected));
       sqlLine.runCommands(new DispatchCallback(), "!quit");
       assertTrue(sqlLine.isExit());
@@ -441,7 +488,7 @@ public class SqlLineArgsTest {
   @Test
   public void testScan() {
     final String expectedLine0 = "Compliant Version Driver Class";
-    final String expectedLine1 = "yes       2.4     org.hsqldb.jdbc.JDBCDriver";
+    final String expectedLine1 = "yes       2.5     org.hsqldb.jdbc.JDBCDriver";
     checkScriptFile("!scan\n", false,
         equalTo(SqlLine.Status.OK),
         allOf(containsString(expectedLine0), containsString(expectedLine1)));
@@ -458,6 +505,75 @@ public class SqlLineArgsTest {
     checkScriptFile(script, false,
         equalTo(SqlLine.Status.OK),
         containsString("| 1           | null        |     |\n"));
+  }
+
+  @Test
+  public void testTableOutputWithoutTypes() {
+    final String script = "!set showTypes true\n"
+        + "!set incremental true\n"
+        + "values (1, cast(null as integer), cast(null as varchar(3)));\n";
+    checkScriptFile(script, false,
+        equalTo(SqlLine.Status.OK),
+        allOf(
+            containsString("| INTEGER | INTEGER | VARCHAR |\n"),
+            containsString("| 1           | null        |     |\n")));
+  }
+
+  @Test
+  public void testTableOutputWithoutTypesButWithoutHeader() {
+    final String script = "!set showTypes true\n"
+        + "!set showHeader false\n"
+        + "!set incremental true\n"
+        + "values (1, cast(null as integer), cast(null as varchar(3)));\n";
+    checkScriptFile(script, false,
+        equalTo(SqlLine.Status.OK),
+            containsString("| 1           | null        |     |\n"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 1, 2, 3, 4})
+  public void testTableOutputWithoutTerminalAndWithSmallWidth(int maxWidth) {
+    new MockUp<SqlLine>() {
+      @Mock
+      LineReader getLineReader() {
+        return null;
+      }
+    };
+    final String script = "!set maxwidth " + maxWidth + "\n"
+        + "!set incremental true\n"
+        + "values (1, cast(null as integer), cast(null as varchar(3)));\n";
+    checkScriptFile(script, false,
+        equalTo(SqlLine.Status.OK),
+        containsString("|  |\n"));
+  }
+
+  @Test
+  public void testTableOutputWithZeroMaxWidthAndExistingTerminal() {
+    try {
+      new MockUp<DumbTerminal>() {
+        @Mock
+        public Size getSize() {
+          return new Size(80, 20);
+        }
+      };
+      final LineReaderBuilder lineReaderBuilder = LineReaderBuilder.builder()
+          .parser(new SqlLineParser(sqlLine))
+          .terminal(TerminalBuilder.builder().dumb(true).build());
+      sqlLine.setLineReader(lineReaderBuilder.build());
+      final String script = "!set maxwidth 0\n"
+          + "!set incremental true\n"
+          + "values (1, cast(null as integer), cast(null as varchar(3)));\n";
+      checkScriptFile(script, false,
+          equalTo(SqlLine.Status.OK),
+          containsString(
+              "+-------------+-------------+-----+\n"
+                  + "|     C1      |     C2      | C3  |\n"
+                  + "+-------------+-------------+-----+\n"
+                  + "| 1           | null        |     |\n"
+                  + "+-------------+-------------+-----+\n"));
+    } catch (Exception e) {
+      fail("Test failed with ", e);
+    }
   }
 
   /**
@@ -484,8 +600,8 @@ public class SqlLineArgsTest {
   public void testClose() {
     final String expected = "!close\n"
         + "Closing: org.hsqldb.jdbc.JDBCConnection";
-    checkScriptFile("!close\n", false, equalTo(SqlLine.Status.OK),
-        containsString(expected));
+    checkScriptFile("!verbose true;\n!close\n", false,
+        equalTo(SqlLine.Status.OK), containsString(expected));
   }
 
   /**
@@ -505,13 +621,17 @@ public class SqlLineArgsTest {
         + "==================================================\n"
         + "autoCommit      true/false "
         + "Enable/disable automatic transaction commit\n"
+        + "autoPairing     true/false Enable/disable widget that "
+        + "auto-closes, deletes \n"
+        + "                           and skips over matching delimiters\n"
+        + "autoResize      true/false Enable/disable automatic resizing of\n"
+        + "                           max height/width based on terminal size\n"
         + "autoSave        true/false Automatically save preferences\n";
     checkScriptFile("!help set\n", false, equalTo(SqlLine.Status.OK),
         containsString(expected));
 
     // Make sure that each variable (autoCommit, autoSave, color, etc.) has a
     // line in the output of '!help set'
-    final SqlLine sqlLine = new SqlLine();
     String help = sqlLine.loc("help-set")
         + sqlLine.loc("variables");
 
@@ -554,7 +674,6 @@ public class SqlLineArgsTest {
     final String expected = "1/1          !help all\n"
         + "!all                Execute the specified SQL against all the current\n"
         + "                    connections\n"
-        + "Closing: org.hsqldb.jdbc.JDBCConnection\n"
         + "sqlline version ???\n";
     checkScriptFile("!help all\n", false, equalTo(SqlLine.Status.OK),
         is(expected));
@@ -583,7 +702,6 @@ public class SqlLineArgsTest {
     for (String c : new String[] {"go", "#"}) {
       final String expected = "1/1          !help " + c + "\n"
           + "!go                 Select the current connection\n"
-          + "Closing: org.hsqldb.jdbc.JDBCConnection\n"
           + "sqlline version ???\n";
       checkScriptFile("!help " + c + "\n", false, equalTo(SqlLine.Status.OK),
           is(expected));
@@ -624,11 +742,10 @@ public class SqlLineArgsTest {
         }
       };
 
-      SqlLine beeLine = new SqlLine();
       SqlLine.Status status =
-          begin(beeLine, baos, false, "-e", "!set maxwidth 80");
+          begin(sqlLine, baos, false, "-e", "!set maxwidth 80");
       assertThat(status, equalTo(SqlLine.Status.OK));
-      beeLine.runCommands(new DispatchCallback(), "!manual");
+      sqlLine.runCommands(new DispatchCallback(), "!manual");
       String output = baos.toString("UTF8");
 
       assertThat(output, containsString(expectedLine));
@@ -768,39 +885,47 @@ public class SqlLineArgsTest {
    */
   @Test
   public void testRecordFilenameWithSpace() {
-    File file = createTempFile("sqlline file with spaces", ".log");
+    final String fileNameWithSpaces = "sqlline' file with spaces";
+    File file = createTempFile(fileNameWithSpaces, ".log");
+    final SqlLine sqlLine = new SqlLine();
     final String script = "!set incremental true\n"
         + "values 1;\n"
-        + "!record " + file.getAbsolutePath() + "\n"
+        + "!record " + sqlLine.escapeAndQuote(file.getAbsolutePath()) + "\n"
         + "!set outputformat csv\n"
         + "values 2;\n"
         + "!record\n"
         + "!set outputformat csv\n"
         + "values 3;\n";
+
     checkScriptFile(script, false,
         equalTo(SqlLine.Status.OK),
-        RegexMatcher.of("(?s)1/8          !set incremental true\n"
-            + "2/8          values 1;\n"
-            + "\\+-------------\\+\n"
-            + "\\|     C1      \\|\n"
-            + "\\+-------------\\+\n"
-            + "\\| 1           \\|\n"
-            + "\\+-------------\\+\n"
-            + "1 row selected \\([0-9.,]+ seconds\\)\n"
-            + "3/8          !record .*.log\n"
-            + "Saving all output to \".*.log\". Enter \"record\" with no arguments to stop it.\n"
-            + "4/8          !set outputformat csv\n"
-            + "5/8          values 2;\n"
-            + "'C1'\n"
-            + "'2'\n"
-            + "1 row selected \\([0-9.,]+ seconds\\)\n"
-            + "6/8          !record\n"
-            + "Recording stopped.\n"
-            + "7/8          !set outputformat csv\n"
-            + "8/8          values 3;\n"
-            + "'C1'\n"
-            + "'3'\n"
-            + "1 row selected \\([0-9.,]+ seconds\\)\n.*"));
+            allOf(containsString("!set incremental true\n"),
+                containsString("values 1;\n"),
+                containsString("+-------------+\n"),
+                containsString("|     C1      |\n"),
+                containsString("+-------------+\n"),
+                containsString("| 1           |\n"),
+                containsString("+-------------+\n"),
+                containsString("1 row selected ("),
+                containsString(
+                    "3/8          !record "
+                        + sqlLine.escapeAndQuote(file.getAbsolutePath())),
+                containsString(
+                    "Saving all output to \"" + file.getAbsolutePath() + "\""),
+                containsString(
+                    "Enter \"record\" with no arguments to stop it.\n"),
+                containsString("4/8          !set outputformat csv\n"),
+                containsString("'C1'\n"),
+                containsString("'2'\n"),
+                containsString("1 row selected ("),
+                containsString("6/8          !record\n"),
+                containsString("Recording stopped.\n"),
+                containsString("7/8          !set outputformat csv\n"),
+                containsString("8/8          values 3;\n"),
+                containsString("'C1'\n"),
+                containsString("'3'\n"),
+                containsString("1 row selected (")));
+
 
     // Now check that the right stuff got into the file.
     assertFileContains(file,
@@ -812,6 +937,50 @@ public class SqlLineArgsTest {
             + "'2'\n"
             + "1 row selected \\([0-9.,]+ seconds\\)\n"
             + "6/8          !record\n"));
+  }
+
+  @Test
+  public void testRecordInSilentMode() {
+    final String fileName = "filename";
+    File file = createTempFile(fileName, ".log");
+    final SqlLine sqlLine = new SqlLine();
+    final String script = "!set incremental true\n!set silent true\n"
+        + "!record " + sqlLine.escapeAndQuote(file.getAbsolutePath()) + "\n"
+        + "values 1;\n"
+        + "!set outputformat csv\n"
+        + "values 2;\n"
+        + "!set outputformat csv\n"
+        + "values 3;\n"
+        + "!record\n";
+
+    checkScriptFile(script, false, equalTo(SqlLine.Status.OK),
+        allOf(containsString("!set incremental true\n"),
+            containsString("!set silent true\n"),
+            containsString("+-------------+\n"),
+            containsString("|     C1      |\n"),
+            containsString("+-------------+\n"),
+            containsString("| 1           |\n"),
+            containsString("+-------------+\n"),
+            containsString("'C1'\n"),
+            containsString("'2'\n"),
+            containsString("'C1'\n"),
+            containsString("'3'\n")));
+
+    assertFileContains(file,
+        allOf(containsString("+-------------+\n"),
+            containsString("|     C1      |\n"),
+            containsString("+-------------+\n"),
+            containsString("| 1           |\n"),
+            containsString("+-------------+\n"),
+            containsString("'C1'\n"),
+            containsString("'2'\n"),
+            containsString("'C1'\n"),
+            containsString("'3'\n"),
+            not(allOf(
+                containsString("!set incremental true\n"),
+                containsString("!set silent true\n"),
+                containsString("Saving all output\n"),
+                containsString(" selected \n")))));
   }
 
   private static void assertFileContains(File file, Matcher<String> matcher) {
@@ -899,7 +1068,6 @@ public class SqlLineArgsTest {
           result = new SQLException("Method not supported");
         }
       };
-      SqlLine sqlLine = new SqlLine();
       ByteArrayOutputStream os = new ByteArrayOutputStream();
       PrintStream sqllineOutputStream =
           new PrintStream(os, false, StandardCharsets.UTF_8.name());
@@ -959,7 +1127,6 @@ public class SqlLineArgsTest {
           result = new SQLException("Generated Exception.");
         }
       };
-      SqlLine sqlLine = new SqlLine();
       ByteArrayOutputStream os = new ByteArrayOutputStream();
       PrintStream sqllineOutputStream =
           new PrintStream(os, false, StandardCharsets.UTF_8.name());
@@ -1074,8 +1241,6 @@ public class SqlLineArgsTest {
    */
   @Test
   public void testNPE() {
-    SqlLine sqlLine = new SqlLine();
-
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     PrintStream sqllineOutputStream = getPrintStream(os);
     sqlLine.setOutputStream(sqllineOutputStream);
@@ -1101,7 +1266,6 @@ public class SqlLineArgsTest {
 
   @Test
   public void testCommandHandlerOnStartup() {
-    SqlLine sqlLine = new SqlLine();
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     final String[] args = {
         "-e", "!set maxwidth 80",
@@ -1130,7 +1294,6 @@ public class SqlLineArgsTest {
 
   @Test
   public void testCommandHandler() {
-    SqlLine sqlLine = new SqlLine();
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     begin(sqlLine, os, false, "-e", "!set maxwidth 80");
 
@@ -1217,13 +1380,12 @@ public class SqlLineArgsTest {
 
   @Test
   public void testSetNonIntValuesToIntProperties() {
-    SqlLine sqlLine = new SqlLine();
     final String headerIntervalScript = "!set headerinterval abc\n";
-    checkScriptFile(headerIntervalScript, false, equalTo(SqlLine.Status.OK),
+    checkScriptFile(headerIntervalScript, true, equalTo(SqlLine.Status.OK),
         containsString(sqlLine.loc("not-a-number", "headerinterval", "abc")));
 
     final String rowLimitScript = "!set rowlimit xxx\n";
-    checkScriptFile(rowLimitScript, false, equalTo(SqlLine.Status.OK),
+    checkScriptFile(rowLimitScript, true, equalTo(SqlLine.Status.OK),
         containsString(sqlLine.loc("not-a-number", "rowlimit", "xxx")));
   }
 
@@ -1270,6 +1432,9 @@ public class SqlLineArgsTest {
   @Test
   public void testSelectJson() {
     final String script = "!set outputformat json\n"
+        // two lines of values to cover case from
+        // https://github.com/julianhyde/sqlline/issues/447
+        + "values (1);\n"
         + "values (1, -1.5, 1 = 1, date '1969-07-20', null, ' 1''2\"3\t4');\n";
     checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
         allOf(containsString("{\"resultset\":["),
@@ -1314,34 +1479,29 @@ public class SqlLineArgsTest {
       final String defaultTimestampFormat = "!set timestampFormat default\n";
 
       // successful cases
-      final SqlLine sqlLine = new SqlLine();
+      sqlLine.getOpts().setPropertiesFile(DEV_NULL);
       sqlLine.runCommands(new DispatchCallback(), okTimeFormat);
-      assertThat(errBaos.toString("UTF8"),
+      checkScriptFile(okTimeFormat, false, equalTo(SqlLine.Status.OK),
           not(
               anyOf(containsString("Error setting configuration"),
                   containsString("Exception"))));
-      sqlLine.runCommands(new DispatchCallback(), defaultTimeFormat);
-      assertThat(errBaos.toString("UTF8"),
+      checkScriptFile(defaultTimeFormat, false, equalTo(SqlLine.Status.OK),
           not(
               anyOf(containsString("Error setting configuration"),
                   containsString("Exception"))));
-      sqlLine.runCommands(new DispatchCallback(), okDateFormat);
-      assertThat(errBaos.toString("UTF8"),
+      checkScriptFile(okDateFormat, false, equalTo(SqlLine.Status.OK),
           not(
               anyOf(containsString("Error setting configuration"),
                   containsString("Exception"))));
-      sqlLine.runCommands(new DispatchCallback(), defaultDateFormat);
-      assertThat(errBaos.toString("UTF8"),
+      checkScriptFile(defaultDateFormat, false, equalTo(SqlLine.Status.OK),
           not(
               anyOf(containsString("Error setting configuration"),
                   containsString("Exception"))));
-      sqlLine.runCommands(new DispatchCallback(), okTimestampFormat);
-      assertThat(errBaos.toString("UTF8"),
+      checkScriptFile(okTimestampFormat, false, equalTo(SqlLine.Status.OK),
           not(
               anyOf(containsString("Error setting configuration"),
                   containsString("Exception"))));
-      sqlLine.runCommands(new DispatchCallback(), defaultTimestampFormat);
-      assertThat(errBaos.toString("UTF8"),
+      checkScriptFile(defaultTimestampFormat, false, equalTo(SqlLine.Status.OK),
           not(
               anyOf(containsString("Error setting configuration"),
                   containsString("Exception"))));
@@ -1353,15 +1513,15 @@ public class SqlLineArgsTest {
           "!set timestampFormat 'YYYY-MM-ddTHH:MI:ss'\n";
 
       // failed cases
-      sqlLine.runCommands(new DispatchCallback(), wrongTimeFormat);
-      assertThat(errBaos.toString("UTF8"),
-          containsString("Illegal pattern character 'q'"));
-      sqlLine.runCommands(new DispatchCallback(), wrongDateFormat);
-      assertThat(errBaos.toString("UTF8"),
-          containsString("Illegal pattern character 'A'"));
-      sqlLine.runCommands(new DispatchCallback(), wrongTimestampFormat);
-      assertThat(errBaos.toString("UTF8"),
-          containsString("Illegal pattern character 'T'"));
+      checkScriptFile(wrongTimeFormat, true, equalTo(SqlLine.Status.OTHER),
+          allOf(containsString("Illegal pattern character 'q'"),
+              containsString("Exception")));
+      checkScriptFile(wrongDateFormat, true, equalTo(SqlLine.Status.OTHER),
+          allOf(containsString("Illegal pattern character 'A'"),
+              containsString("Exception")));
+      checkScriptFile(wrongTimestampFormat, true, equalTo(SqlLine.Status.OTHER),
+          allOf(containsString("Illegal pattern character 'T'"),
+              containsString("Exception")));
     } catch (Throwable t) {
       // fail
       throw new RuntimeException(t);
@@ -1404,7 +1564,6 @@ public class SqlLineArgsTest {
         }
       };
 
-      SqlLine sqlLine = new SqlLine();
       ByteArrayOutputStream os = new ByteArrayOutputStream();
       PrintStream sqllineOutputStream =
           new PrintStream(os, false, StandardCharsets.UTF_8.name());
@@ -1448,25 +1607,25 @@ public class SqlLineArgsTest {
         return "";
       }
     };
-    SqlLine beeLine = new SqlLine();
     try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
       SqlLine.Status status =
-          begin(beeLine, os, false, "-e", "!set maxwidth 80");
+          begin(sqlLine, os, false, "-e", "!set maxwidth 80");
       assertThat(status, equalTo(SqlLine.Status.OK));
       DispatchCallback dc = new DispatchCallback();
-      beeLine.runCommands(dc,
+      sqlLine.runCommands(dc,
           "!set maxwidth 80",
+          "!set maxColumnWidth 10",
           "!set incremental true");
-      beeLine.runCommands(dc, "!connect "
+      sqlLine.runCommands(dc, "!connect "
           + ConnectionSpec.H2.url + " "
           + ConnectionSpec.H2.username);
-      beeLine.runCommands(dc, "!tables");
+      sqlLine.runCommands(dc, "!tables");
       String output = os.toString("UTF8");
-      final String expected = "| TABLE_CAT | TABLE_SCHEM | "
-          + "TABLE_NAME | TABLE_TYPE | REMARKS | TYPE_CAT | TYP |";
+      final String expected = "| TABLE_CAT  | TABLE_SCHEM |"
+          + " TABLE_NAME | TABLE_TYPE |  REMARKS   |  TYPE_CAT  |";
       assertThat(output, containsString(expected));
-      beeLine.runCommands(new DispatchCallback(), "!quit");
-      assertTrue(beeLine.isExit());
+      sqlLine.runCommands(new DispatchCallback(), "!quit");
+      assertTrue(sqlLine.isExit());
     } catch (Throwable t) {
       // fail
       throw new RuntimeException(t);
@@ -1483,30 +1642,30 @@ public class SqlLineArgsTest {
    */
   @Test
   public void testConnectWithDbPropertyAsParameter() {
-    SqlLine beeLine = new SqlLine();
     try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
       SqlLine.Status status =
-          begin(beeLine, os, false, "-e", "!set maxwidth 80");
+          begin(sqlLine, os, false, "-e", "!set maxwidth 80");
       assertThat(status, equalTo(SqlLine.Status.OK));
       DispatchCallback dc = new DispatchCallback();
-      beeLine.runCommands(dc,
+      sqlLine.runCommands(dc,
           "!set maxwidth 80",
+          "!set maxColumnWidth 10\n",
           "!set incremental true");
       String fakeNonEmptyPassword = "nonEmptyPasswd";
       final byte[] bytes =
           fakeNonEmptyPassword.getBytes(StandardCharsets.UTF_8);
-      beeLine.runCommands(dc, "!connect "
+      sqlLine.runCommands(dc, "!connect "
           + " -p PASSWORD_HASH TRUE "
           + ConnectionSpec.H2.url + " "
           + ConnectionSpec.H2.username + " "
           + StringUtils.convertBytesToHex(bytes));
-      beeLine.runCommands(dc, "!tables");
+      sqlLine.runCommands(dc, "!tables");
       String output = os.toString("UTF8");
-      final String expected = "| TABLE_CAT | TABLE_SCHEM | "
-          + "TABLE_NAME | TABLE_TYPE | REMARKS | TYPE_CAT | TYP |";
+      final String expected = "| TABLE_CAT  | TABLE_SCHEM |"
+          + " TABLE_NAME | TABLE_TYPE |  REMARKS   |  TYPE_CAT  |";
       assertThat(output, containsString(expected));
-      beeLine.runCommands(new DispatchCallback(), "!quit");
-      assertTrue(beeLine.isExit());
+      sqlLine.runCommands(new DispatchCallback(), "!quit");
+      assertTrue(sqlLine.isExit());
     } catch (Throwable t) {
       // fail
       throw new RuntimeException(t);
@@ -1524,28 +1683,27 @@ public class SqlLineArgsTest {
    * </blockquote>
    */
   @Test
-  public void testConnectWithDbPropertyAsParameter2() {
-    SqlLine beeLine = new SqlLine();
+  public void testConnectWithDbPropertyAllowLiteralsAsParameter() {
     try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
       SqlLine.Status status =
-          begin(beeLine, os, false, "-e", "!set maxwidth 80");
+          begin(sqlLine, os, false, "-e", "!set maxwidth 80");
       assertThat(status, equalTo(SqlLine.Status.OK));
       DispatchCallback dc = new DispatchCallback();
-      beeLine.runCommands(dc, "!set maxwidth 80");
+      sqlLine.runCommands(dc, "!set maxwidth 80");
       String fakeNonEmptyPassword = "nonEmptyPasswd";
       final byte[] bytes =
           fakeNonEmptyPassword.getBytes(StandardCharsets.UTF_8);
-      beeLine.runCommands(dc, "!connect "
+      sqlLine.runCommands(dc, "!connect "
             + " -p PASSWORD_HASH TRUE -p ALLOW_LITERALS NONE "
             + ConnectionSpec.H2.url + " "
             + ConnectionSpec.H2.username + " "
             + StringUtils.convertBytesToHex(bytes));
-      beeLine.runCommands(dc, "select 1;");
+      sqlLine.runCommands(dc, "select 1;");
       String output = os.toString("UTF8");
       final String expected = "Error:";
       assertThat(output, containsString(expected));
-      beeLine.runCommands(new DispatchCallback(), "!quit");
-      assertTrue(beeLine.isExit());
+      sqlLine.runCommands(new DispatchCallback(), "!quit");
+      assertTrue(sqlLine.isExit());
     } catch (Throwable t) {
       // fail
       throw new RuntimeException(t);
@@ -1561,19 +1719,18 @@ public class SqlLineArgsTest {
    */
   @Test
   public void testConnectWithDbProperty() {
-    SqlLine beeLine = new SqlLine();
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     SqlLine.Status status =
-        begin(beeLine, os, false, "-e", "!set maxwidth 80");
+        begin(sqlLine, os, false, "-e", "!set maxwidth 80");
     assertThat(status, equalTo(SqlLine.Status.OK));
     DispatchCallback dc = new DispatchCallback();
 
     try {
-      beeLine.runCommands(dc, "!set maxwidth 80");
+      sqlLine.runCommands(dc, "!set maxwidth 80", "!set maxColumnWidth 10");
 
       // fail attempt
       String fakeNonEmptyPassword = "nonEmptyPasswd";
-      beeLine.runCommands(dc, "!connect \""
+      sqlLine.runCommands(dc, "!connect \""
             + ConnectionSpec.H2.url
             + " ;PASSWORD_HASH=TRUE\" "
             + ConnectionSpec.H2.username
@@ -1586,33 +1743,89 @@ public class SqlLineArgsTest {
       // success attempt
       final byte[] bytes =
           fakeNonEmptyPassword.getBytes(StandardCharsets.UTF_8);
-      beeLine.runCommands(dc, "!connect \""
+      sqlLine.runCommands(dc, "!connect \""
             + ConnectionSpec.H2.url
             + " ;PASSWORD_HASH=TRUE;ALLOW_LITERALS=NONE\" "
             + ConnectionSpec.H2.username + " \""
             + StringUtils.convertBytesToHex(bytes)
             + "\"");
-      beeLine.runCommands(dc, "!set incremental true");
-      beeLine.runCommands(dc, "!tables");
+      sqlLine.runCommands(dc, "!set incremental true");
+      sqlLine.runCommands(dc, "!tables");
       output = os.toString("UTF8");
-      final String expected1 = "| TABLE_CAT | TABLE_SCHEM | "
-          + "TABLE_NAME | TABLE_TYPE | REMARKS | TYPE_CAT | TYP |";
+      final String expected1 = "| TABLE_CAT  | TABLE_SCHEM |"
+          + " TABLE_NAME | TABLE_TYPE |  REMARKS   |  TYPE_CAT  |";
       assertThat(output, containsString(expected1));
 
-      beeLine.runCommands(dc, "select 5;");
+      sqlLine.runCommands(dc, "select 5;");
       output = os.toString("UTF8");
       final String expected2 = "Error:";
       assertThat(output, containsString(expected2));
       os.reset();
 
-      beeLine.runCommands(new DispatchCallback(), "!quit");
+      sqlLine.runCommands(new DispatchCallback(), "!quit");
       output = os.toString("UTF8");
       assertThat(output,
           allOf(not(containsString("Error:")), containsString("!quit")));
-      assertTrue(beeLine.isExit());
+      assertTrue(sqlLine.isExit());
     } catch (Exception e) {
       // fail
       throw new RuntimeException(e);
+    }
+  }
+
+  /**
+   * Test case for
+   * <a href="https://github.com/julianhyde/sqlline/issues/389">[SQLLINE-389]
+   * DB specific properties not read when using !properties</a>
+   *
+   * Tests the {@code !properties} command passing in the password in as a hash,
+   * and using h2's {@code PASSWORD_HASH} and {@code ALLOW_LITERALS} properties
+   * in properties file.
+   *
+   * The test is similar to
+   * {@link SqlLineArgsTest#testConnectWithDbPropertyAllowLiteralsAsParameter()}
+   * however for another command {@code !properties}
+   */
+  @Test
+  public void testPropertiesForDBSpecificProperties() {
+    try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
+      SqlLine.Status status =
+          begin(sqlLine, os, false, "-e", "!set maxwidth 80");
+      assertThat(status, equalTo(SqlLine.Status.OK));
+      DispatchCallback dc = new DispatchCallback();
+      sqlLine.runCommands(dc,
+          "!set maxwidth 80",
+          "!set incremental true");
+      String fakeNonEmptyPassword = "nonEmptyPasswd";
+      final byte[] bytes =
+          fakeNonEmptyPassword.getBytes(StandardCharsets.UTF_8);
+      final File tmpPropFile = createTempFile("prop", "temp");
+      try (BufferedWriter bw =
+          new BufferedWriter(
+              new OutputStreamWriter(
+                  new FileOutputStream(tmpPropFile),
+                      StandardCharsets.UTF_8))) {
+        bw.write("url=" + ConnectionSpec.H2.url + "\n"
+            + "user=" + ConnectionSpec.H2.username + "\n"
+            + "password=" + StringUtils.convertBytesToHex(bytes) + "\n"
+            + "PASSWORD_HASH=TRUE\n"
+            + "ALLOW_LITERALS=NONE\n"
+        );
+        bw.flush();
+      }
+      assertThat(status, equalTo(SqlLine.Status.OK));
+
+      sqlLine.runCommands(dc, "!properties "
+          + tmpPropFile.getAbsolutePath());
+      sqlLine.runCommands(dc, "select 1;");
+      String output = os.toString("UTF8");
+      final String expected = "Error:";
+      assertThat(output, containsString(expected));
+      sqlLine.runCommands(new DispatchCallback(), "!quit");
+      assertTrue(sqlLine.isExit());
+    } catch (Throwable t) {
+      // fail
+      throw new RuntimeException(t);
     }
   }
 
@@ -1627,11 +1840,30 @@ public class SqlLineArgsTest {
 
   @Test
   public void testReconnect() {
-    final String script = "!reconnect";
+    final String script = "!verbose true;\n!reconnect";
     final String expected = "Reconnecting to \"jdbc:hsqldb:res:scott\"...\n"
         + "Closing: org.hsqldb.jdbc.JDBCConnection";
     checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
         containsString(expected));
+  }
+
+  @Test
+  public void testSchemas() {
+    // Set width so we don't inherit from the current terminal.
+    final String script = "!set maxwidth 80\n"
+        + "!set maxcolumnwidth 15\n"
+        + "!set incremental true\n"
+        + "!schemas\n";
+    final String line0 =
+        "|   TABLE_SCHEM   |  TABLE_CATALOG  | IS_DEFAULT |";
+    final String line1 = "| INFORMATION_SCHEMA | PUBLIC          | FALSE";
+    final String line2 = "| PUBLIC          | PUBLIC          | TRUE       |";
+    final String line3 = "| SCOTT           | PUBLIC          | FALSE      |";
+    final String line4 = "| SYSTEM_LOBS     | PUBLIC          | FALSE      |";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
+        allOf(containsString(line0), containsString(line1),
+            containsString(line2), containsString(line3),
+            containsString(line4)));
   }
 
   @Test
@@ -1655,12 +1887,73 @@ public class SqlLineArgsTest {
     // Set width so we don't inherit from the current terminal.
     final String script = "!set maxwidth 80\n"
         + "!set incremental true\n"
+        + "!set maxColumnWidth 10\n"
         + "!tables\n";
-    final String line0 = "| TABLE_CAT | TABLE_SCHEM | TABLE_NAME |";
+    final String line0 = "| TABLE_CAT  | TABLE_SCHEM | TABLE_NAME |";
     final String line1 =
-        "| UNNAMED   | INFORMATION_SCHEMA | CATALOGS   | SYSTEM TABLE";
+        "| UNNAMED    | INFORMATION_SCHEMA | CONSTANTS  | BASE TABLE";
     checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
         allOf(containsString(line0), containsString(line1)));
+  }
+
+  @Test
+  public void testTablesWithTablePattern() {
+    connectionSpec = ConnectionSpec.H2;
+    // Set width so we don't inherit from the current terminal.
+    final String script = "!set maxwidth 80\n"
+        + "!set incremental true\n"
+        + "!set maxColumnWidth 10\n"
+        + "!tables INDEXES%\n";
+    final String line0 =
+        "| TABLE_CAT  | TABLE_SCHEM | TABLE_NAME | TABLE_TYPE |  REMARKS   |  TYPE_CAT  |\n";
+    final String line1 =
+        "| UNNAMED    | INFORMATION_SCHEMA | INDEXES    | BASE TABLE |            |     |\n";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
+        allOf(containsString(line0), containsString(line1)));
+  }
+
+  @Test
+  public void testTablesWithSchemaTableType() {
+    connectionSpec = ConnectionSpec.H2;
+    // Set width so we don't inherit from the current terminal.
+    final String script = "!set maxwidth 80\n"
+        + "!set incremental true\n"
+        + "!set maxColumnWidth 10\n"
+        + "!tables INFORMATION_% \n";
+    final String line0 =
+        "| TABLE_CAT  | TABLE_SCHEM | TABLE_NAME | TABLE_TYPE |  REMARKS   |  TYPE_CAT  |\n";
+    final String line1 =
+        "| UNNAMED    | INFORMATION_SCHEMA | INFORMATION_SCHEMA_CATALOG_NAME | BASE TAB |\n";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
+        allOf(containsString(line0), containsString(line1)));
+  }
+
+  @Test
+  public void testColumnsWithSchemaTableType() {
+    connectionSpec = ConnectionSpec.H2;
+    // Set width so we don't inherit from the current terminal.
+    final String script = "!set maxwidth 80\n"
+        + "!set maxColumnWidth 10\n"
+        + "!set incremental true\n"
+        + "!columns INFORMATION_SCHEMA % %\n";
+    final String line0 =
+        "| TABLE_CAT  | TABLE_SCHEM | TABLE_NAME | COLUMN_NAME | DATA_TYPE  | TYPE_NAME |\n";
+    final String line1 =
+        "| UNNAMED    | INFORMATION_SCHEMA | CHECK_CONSTRAINTS | CONSTRAINT_CATALOG | 1 |\n";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
+        allOf(containsString(line0), containsString(line1)));
+  }
+
+  @Test
+  public void testColumnsWithExtraParameters() {
+    connectionSpec = ConnectionSpec.H2;
+    // Set width so we don't inherit from the current terminal.
+    final String script = "!set maxwidth 80\n"
+        + "!set incremental true\n"
+        + "!columns INFORMATION% CAT% CAT% wqer\n";
+    final String line0 = "Usage: ";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OTHER),
+        allOf(containsString(line0)));
   }
 
   /**
@@ -1676,10 +1969,11 @@ public class SqlLineArgsTest {
     // Set width so we don't inherit from the current terminal.
     final String script = "!set maxwidth 80\n"
         + "!set incremental true\n"
+        + "!set maxColumnWidth 10\n"
         + "!tables\n";
-    final String line0 = "| TABLE_CAT | TABLE_SCHEM | TABLE_NAME |";
+    final String line0 = "| TABLE_CAT  | TABLE_SCHEM | TABLE_NAME |";
     final String line1 =
-        "| UNNAMED   | INFORMATION_SCHEMA | CATALOGS   | SYSTEM TABLE";
+        "| UNNAMED    | INFORMATION_SCHEMA | CONSTANTS  | BASE TABLE";
     final String message = "Could not find driver "
         + connectionSpec.driver
         + "; using registered driver org.h2.Driver instead";
@@ -1727,27 +2021,25 @@ public class SqlLineArgsTest {
 
   @Test
   public void testMetadataForClassHierarchy() {
-    final SqlLine beeLine = new SqlLine();
-
     new MockUp<JDBCConnection>() {
       @Mock
       public DatabaseMetaData getMetaData() throws SQLException {
         return new CustomDatabaseMetadata(
-            (JDBCConnection) beeLine.getConnection());
+            (JDBCConnection) sqlLine.getConnection());
       }
     };
 
     try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
       SqlLine.Status status =
-          begin(beeLine, os, false, "-e", "!set maxwidth 80");
+          begin(sqlLine, os, false, "-e", "!set maxwidth 80");
       assertThat(status, equalTo(SqlLine.Status.OK));
       DispatchCallback dc = new DispatchCallback();
-      beeLine.runCommands(dc, "!connect "
+      sqlLine.runCommands(dc, "!connect "
           + ConnectionSpec.HSQLDB.url + " \""
           + ConnectionSpec.HSQLDB.username + "\" \""
           + ConnectionSpec.HSQLDB.password + "\"");
       os.reset();
-      beeLine.runCommands(dc, "!tables");
+      sqlLine.runCommands(dc, "!tables");
       String output = os.toString("UTF8");
       assertThat(output,
           allOf(containsString("TABLE_CAT"),
@@ -1816,6 +2108,152 @@ public class SqlLineArgsTest {
         + "+-------------+-------------+";
     checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
         containsString(line1));
+  }
+
+  @Test
+  public void testAnsiConsoleOutputFormat() {
+    // Set width so we don't inherit from the current terminal.
+    final String script = "!set maxwidth 80\n"
+        + "!set incremental true \n"
+        + "!set outputformat ansiconsole \n"
+        + "!all \n"
+        + "values \n"
+        + "(1, '2') \n"
+        + ";\n";
+    final String line1 = ""
+        + "C1          C2\n"
+        + "1           2 \n";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
+        containsString(line1));
+  }
+
+  @Test
+  public void testAnsiConsoleFormatWithNonExistingTerminalAndSmallWidth() {
+    new MockUp<SqlLine>() {
+      @Mock
+      LineReader getLineReader() {
+        return null;
+      }
+    };
+    final String script = "!set maxwidth 0\n"
+        + "!set incremental true \n"
+        + "!set outputformat ansiconsole \n"
+        + "values (1, '2');\n";
+    final String line1 = ""
+        + "\n"
+        + "\n";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
+        containsString(line1));
+  }
+
+  @Test
+  public void testAnsiConsoleFormatWithZeroMaxWidthAndExistingTerminal() {
+    try {
+      new MockUp<DumbTerminal>() {
+        @Mock
+        public Size getSize() {
+          return new Size(80, 20);
+        }
+      };
+      final LineReaderBuilder lineReaderBuilder = LineReaderBuilder.builder()
+          .parser(new SqlLineParser(sqlLine))
+          .terminal(TerminalBuilder.builder().dumb(true).build());
+      sqlLine.setLineReader(lineReaderBuilder.build());
+      final String script = "!set maxwidth 0\n"
+          + "!set incremental true \n"
+          + "!set outputformat ansiconsole \n"
+          + "!all \n"
+          + "values \n"
+          + "(1, '2') \n"
+          + ";\n";
+      final String line1 = ""
+          + "C1          C2\n"
+          + "1           2 \n";
+      checkScriptFile(script, false,
+          equalTo(SqlLine.Status.OK),
+          containsString(line1));
+    } catch (Exception e) {
+      fail("Test failed with ", e);
+    }
+  }
+
+  @Test
+  public void testBoldHeaderSolidTableOutputFormat() {
+    // Set width so we don't inherit from the current terminal.
+    final String script = "!set maxwidth 80\n"
+        + "!set incremental true \n"
+        + "!set outputformat table\n"
+        + "!set tablestyle bold_header_solid\n"
+        + "!all \n"
+        + "values \n"
+        + "(1, '2') \n"
+        + ";\n";
+    final String line1 = ""
+        + "┏━━━━━━━━━━━━━┳━━━━┓\n"
+        + "┃     C1      ┃ C2 ┃\n"
+        + "┡━━━━━━━━━━━━━╇━━━━┩\n"
+        + "│ 1           │ 2  │\n"
+        + "└─────────────┴────┘";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
+        containsString(line1));
+  }
+
+  @Test
+  public void testSolidTableFormatWithNonExistingTerminalAndSmallWidth() {
+    new MockUp<SqlLine>() {
+      @Mock
+      LineReader getLineReader() {
+        return null;
+      }
+    };
+    final String script = "!set maxwidth 0\n"
+        + "!set incremental true \n"
+        + "!set outputformat table\n"
+        + "!set tablestyle solid\n"
+        + "values (1, '2');\n";
+    final String line1 = ""
+        + "┌──┐\n"
+        + "│  │\n"
+        + "├──┤\n"
+        + "│  │\n"
+        + "└──┘";
+    checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
+        containsString(line1));
+  }
+
+  @Test
+  public void testDoubleSolidTableFormatWithZeroMaxWidthAndExistingTerminal() {
+    try {
+      new MockUp<DumbTerminal>() {
+        @Mock
+        public Size getSize() {
+          return new Size(80, 20);
+        }
+      };
+      final LineReaderBuilder lineReaderBuilder = LineReaderBuilder.builder()
+          .parser(new SqlLineParser(sqlLine))
+          .terminal(TerminalBuilder.builder().dumb(true).build());
+      sqlLine.setLineReader(lineReaderBuilder.build());
+      final String script = "!set maxwidth 0\n"
+          + "!set incremental true \n"
+          + "!set outputformat table\n"
+          + "!set tablestyle double_solid\n"
+          + "!all \n"
+          + "values \n"
+          + "(1, '2') \n"
+          + ";\n";
+      final String line1 = ""
+          + "╔═════════════╦════╗\n"
+          + "║     C1      ║ C2 ║\n"
+          + "╠═════════════╬════╣\n"
+          + "║ 1           ║ 2  ║\n"
+          + "╚═════════════╩════╝\n";
+      checkScriptFile(script, false,
+          equalTo(SqlLine.Status.OK),
+          containsString(line1));
+    } catch (Exception e) {
+      fail("Test failed with ", e);
+    }
   }
 
   @Test
@@ -1928,7 +2366,7 @@ public class SqlLineArgsTest {
         + " sqlline.extensions.CustomApplication\n"
         + "!scan";
     checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
-        allOf(containsString("yes       1.4     org.h2.Driver"),
+        allOf(containsString("yes       2.1     org.h2.Driver"),
                 not(containsString("org.hsqldb.jdbc.JDBCDriver"))));
   }
 
@@ -1945,7 +2383,7 @@ public class SqlLineArgsTest {
         + " sqlline.extensions.CustomApplication\n"
         + "!scan";
     checkScriptFile(script, true, equalTo(SqlLine.Status.OK),
-        allOf(containsString("yes       2.4     org.hsqldb.jdbc.JDBCDriver"),
+        allOf(containsString("yes       2.5     org.hsqldb.jdbc.JDBCDriver"),
             not(containsString("org.h2.Driver"))));
   }
 
@@ -2046,7 +2484,6 @@ public class SqlLineArgsTest {
 
   @Test
   public void testRerun() {
-    final SqlLine beeLine = new SqlLine();
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     final File tmpHistoryFile = createTempFile("tmpHistory", "temp");
     try (BufferedWriter bw =
@@ -2064,12 +2501,12 @@ public class SqlLineArgsTest {
           + "1536743115431:!/ 8\n");
       bw.flush();
 
-      SqlLine.Status status = begin(beeLine, os, true,
+      SqlLine.Status status = begin(sqlLine, os, true,
           "--historyfile=" + tmpHistoryFile.getAbsolutePath(),
           "-e", "!set maxwidth 80");
       assertThat(status, equalTo(SqlLine.Status.OK));
       DispatchCallback dc = new DispatchCallback();
-      beeLine.runCommands(dc,
+      sqlLine.runCommands(dc,
           "!set incremental true",
           "!set maxcolumnwidth 30",
           "!connect "
@@ -2078,10 +2515,10 @@ public class SqlLineArgsTest {
               + "\"\"");
       os.reset();
 
-      beeLine.runCommands(dc, "!/ 1");
+      sqlLine.runCommands(dc, "!/ 1");
       String output = os.toString("UTF8");
-      final String expected0 = "+----------------------------+";
-      final String expected1 = "|             C1             |";
+      final String expected0 = "+----------------------------";
+      final String expected1 = "C1";
       final String expected2 = "1 row selected";
       assertThat(output,
           allOf(containsString(expected0),
@@ -2089,35 +2526,54 @@ public class SqlLineArgsTest {
               containsString(expected2)));
       os.reset();
 
-      beeLine.runCommands(dc, "!/ 4");
+      sqlLine.runCommands(dc, "!/ 4");
       output = os.toString("UTF8");
       String expectedLine3 = "Cycled rerun of commands from history [2, 4]";
       assertThat(output, containsString(expectedLine3));
       os.reset();
 
-      beeLine.runCommands(dc, "!/ 3");
+      sqlLine.runCommands(dc, "!/ 3");
       output = os.toString("UTF8");
       String expectedLine4 = "Cycled rerun of commands from history [3, 5, 7]";
       assertThat(output, containsString(expectedLine4));
       os.reset();
 
-      beeLine.runCommands(dc, "!/ 8");
+      sqlLine.runCommands(dc, "!/ 8");
       output = os.toString("UTF8");
       String expectedLine5 = "Cycled rerun of commands from history [8]";
       assertThat(output, containsString(expectedLine5));
       os.reset();
 
-      beeLine.runCommands(dc, "!rerun " + Integer.MAX_VALUE);
+      sqlLine.runCommands(dc, "!rerun " + Integer.MAX_VALUE);
       output = os.toString("UTF8");
       String expectedLine6 =
           "Usage: rerun <offset>, available range of offset is -7..8";
       assertThat(output, containsString(expectedLine6));
-      beeLine.runCommands(new DispatchCallback(), "!quit");
-      assertTrue(beeLine.isExit());
+      sqlLine.runCommands(new DispatchCallback(), "!quit");
+      assertTrue(sqlLine.isExit());
     } catch (Exception e) {
       // fail
       throw new RuntimeException(e);
     }
+  }
+
+  @Test
+  public void testMaxColumnWidthForLongString() {
+    final String script1 = "!set maxcolumnwidth 30\n"
+        + "!set incremental true\n"
+        + "values ('This is a very long string\n"
+        + "This is a very long string\n"
+        + "This is a very long string')";
+    final String line1 = ""
+        + "+--------------------------------+\n"
+        + "|               C1               |\n"
+        + "+--------------------------------+\n"
+        + "| This is a very long string \n"
+        + "This is a very long string \n"
+        + "This is a very long  |\n"
+        + "+--------------------------------+";
+    checkScriptFile(script1, true, equalTo(SqlLine.Status.OK),
+        containsString(line1));
   }
 
   @Test
@@ -2174,7 +2630,6 @@ public class SqlLineArgsTest {
   @Test
   public void testMaxColumnWidthBuffered() {
     final String script1 = "!set maxcolumnwidth -1\n"
-            + "!set incremental false\n"
             + "values (100, 200)";
     final String line1 = ""
             + "+-----+-----+\n"
@@ -2186,7 +2641,6 @@ public class SqlLineArgsTest {
             containsString(line1));
 
     final String script2 = "!set maxcolumnwidth 0\n"
-            + "!set incremental false\n"
             + "values (100, 200)";
     final String line2 = ""
             + "+-----+-----+\n"
@@ -2198,7 +2652,6 @@ public class SqlLineArgsTest {
             containsString(line2));
 
     final String script3 = "!set maxcolumnwidth 5000\n"
-            + "!set incremental false\n"
             + "values (100, 200)";
     final String line3 = ""
             + "+-----+-----+\n"
@@ -2210,7 +2663,6 @@ public class SqlLineArgsTest {
             containsString(line3));
 
     final String script4 = "!set maxcolumnwidth 2\n"
-            + "!set incremental false\n"
             + "values (100, 200)";
     final String line4 = ""
             + "+----+----+\n"
@@ -2227,7 +2679,6 @@ public class SqlLineArgsTest {
   @Test
   public void testIncrementalBufferRows() {
     final String script1 = "!set incrementalBufferRows -1\n"
-        + "!set incremental false\n"
         + "select * from (values (10, 20), (1, 2), (111, 2), (11, 2222))";
     final String line1 = ""
         + "+-----+------+\n"
@@ -2247,7 +2698,6 @@ public class SqlLineArgsTest {
   @Test
   public void testIncrementalBufferRows2() {
     final String script2 = "!set incrementalBufferRows 0\n"
-        + "!set incremental false\n"
         + "select * from (values (1, 2), (1, 20), (111, 20), (11, 2222), (1, 22))";
     final String line2 = ""
         + "+----+----+\n"
@@ -2268,7 +2718,6 @@ public class SqlLineArgsTest {
   @Test
   public void testIncrementalBufferRows3() {
     final String script3 = "!set incrementalBufferRows 1\n"
-        + "!set incremental false\n"
         + "select * from (values (10, 20), (1, 2), (111, 2), (11, 2222), (111, 2222))";
     final String line3 = ""
         + "+----+----+\n"
@@ -2289,7 +2738,6 @@ public class SqlLineArgsTest {
   @Test
   public void testIncrementalBufferRows4() {
     final String script4 = "!set incrementalBufferRows 4\n"
-        + "!set incremental false\n"
         + "select * from (values (10, 20), (1, 2), (111, 2), (11, 2222))";
     final String line4 = ""
         + "+-----+------+\n"
@@ -2309,7 +2757,6 @@ public class SqlLineArgsTest {
     // With incrementalBufferRows default (1000), query starts and
     // stays in incremental mode.
     final String script5 = "!set incrementalBufferRows default\n"
-        + "!set incremental false\n"
         + "select * from (values (10, 20), (1, 2))";
     final String line5 = ""
         + "+----+----+\n"
@@ -2324,7 +2771,6 @@ public class SqlLineArgsTest {
 
   @Test
   public void testMaxHistoryFileRows() {
-    final SqlLine beeLine = new SqlLine();
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     final File tmpHistoryFile = createTempFile("tmpHistory", "temp");
     try (BufferedWriter bw =
@@ -2344,16 +2790,16 @@ public class SqlLineArgsTest {
       bw.flush();
       bw.close();
 
-      SqlLine.Status status = begin(beeLine, os, true,
+      SqlLine.Status status = begin(sqlLine, os, true,
           "--historyfile=" + tmpHistoryFile.getAbsolutePath(),
           "-e", "!set maxwidth 80");
       assertThat(status, equalTo(SqlLine.Status.OK));
       DispatchCallback dc = new DispatchCallback();
 
       final int maxLines = 3;
-      beeLine.runCommands(dc, "!set maxHistoryFileRows " + maxLines);
+      sqlLine.runCommands(dc, "!set maxHistoryFileRows " + maxLines);
       os.reset();
-      beeLine.runCommands(dc, "!history");
+      sqlLine.runCommands(dc, "!history");
       assertEquals(maxLines + 1,
           os.toString("UTF8").split("\\s+\\d{2}:\\d{2}:\\d{2}\\s+").length);
       os.reset();
@@ -2365,18 +2811,45 @@ public class SqlLineArgsTest {
 
   @Test
   public void testSave() {
-    final SqlLine beeLine = new SqlLine();
+    ByteArrayOutputStream os = new ByteArrayOutputStream();
+    final String testSqllinePropertiesFile = "test.sqlline.properties";
+    try {
+      SqlLine.Status status = begin(sqlLine, os, false,
+          "--propertiesFile=" + testSqllinePropertiesFile, "-e", "!save");
+      assertThat(status, equalTo(SqlLine.Status.OK));
+      final DispatchCallback dc = new DispatchCallback();
+
+      assertThat(os.toString("UTF8"),
+          allOf(containsString("Saving preferences to"),
+              not(containsString("Saving to /dev/null not supported"))));
+      os.reset();
+      sqlLine.runCommands(dc, "!set");
+      assertThat(os.toString("UTF8"),
+          allOf(containsString("autoCommit"),
+              not(containsString("Unknown property:"))));
+      os.reset();
+      Files.delete(Paths.get(testSqllinePropertiesFile));
+    } catch (Exception e) {
+      // fail
+      throw new RuntimeException(e);
+    }
+  }
+
+  @Test
+  public void testSaveToDevNull() {
     ByteArrayOutputStream os = new ByteArrayOutputStream();
     try {
-      SqlLine.Status status = begin(beeLine, os, false,
+      SqlLine.Status status = begin(sqlLine, os, false,
+          "--propertiesFile=/dev/null",
           "-e", "!save");
       assertThat(status, equalTo(SqlLine.Status.OK));
       final DispatchCallback dc = new DispatchCallback();
 
       assertThat(os.toString("UTF8"),
-          containsString("Saving preferences to"));
+          allOf(containsString("Saving preferences to"),
+              containsString("Saving to /dev/null not supported")));
       os.reset();
-      beeLine.runCommands(dc, "!set");
+      sqlLine.runCommands(dc, "!set");
       assertThat(os.toString("UTF8"),
           allOf(containsString("autoCommit"),
               not(containsString("Unknown property:"))));
@@ -2411,7 +2884,6 @@ public class SqlLineArgsTest {
   @Test
   public void testStartupArgsWithoutUrl() {
     try {
-      SqlLine sqlLine = new SqlLine();
       ByteArrayOutputStream os = new ByteArrayOutputStream();
       PrintStream sqllineOutputStream =
           new PrintStream(os, false, StandardCharsets.UTF_8.name());
@@ -2440,13 +2912,12 @@ public class SqlLineArgsTest {
   @Test
   public void testConfirmFlag() {
     try {
-      final SqlLine line = new SqlLine();
       final ByteArrayOutputStream os = new ByteArrayOutputStream();
-      assertThat(line.getOpts().getConfirm(), is(false));
-      begin(line, os, false, "-e", "!set confirm true");
-      assertThat(line.getOpts().getConfirm(), is(true));
-      begin(line, os, false, "-e", "!set confirm false");
-      assertThat(line.getOpts().getConfirm(), is(false));
+      assertThat(sqlLine.getOpts().getConfirm(), is(false));
+      begin(sqlLine, os, false, "-e", "!set confirm true");
+      assertThat(sqlLine.getOpts().getConfirm(), is(true));
+      begin(sqlLine, os, false, "-e", "!set confirm false");
+      assertThat(sqlLine.getOpts().getConfirm(), is(false));
     } catch (Throwable e) {
       // fail
       throw new RuntimeException(e);
@@ -2465,9 +2936,9 @@ public class SqlLineArgsTest {
       }
     };
 
-    final SqlLine line = new SqlLine();
-    assertThat(line.getOpts().getConfirm(), is(false));
-    assertThat(line.getOpts().getConfirmPattern(), is("default"));
+    assertThat(sqlLine.getOpts().getConfirm(), is(false));
+    assertThat(sqlLine.getOpts().getConfirmPattern(),
+        is(BuiltInProperty.CONFIRM_PATTERN.defaultValue()));
     String script = "CREATE TABLE dummy_test(pk int);\n"
         + "INSERT INTO dummy_test(pk) VALUES(1);\n"
         + "INSERT INTO dummy_test(pk) VALUES(2);\n"
@@ -2481,7 +2952,7 @@ public class SqlLineArgsTest {
     script = "!set confirm true\n" + script;
     checkScriptFile(script, true,
         equalTo(SqlLine.Status.OTHER),
-        containsString(line.loc("abort-action")));
+        containsString(sqlLine.loc("abort-action")));
   }
 
   /**
@@ -2489,18 +2960,17 @@ public class SqlLineArgsTest {
    */
   @Test
   public void testConfirmPattern() {
-    final SqlLine line = new SqlLine();
-    assertThat(line.getOpts().getConfirm(), is(false));
+    assertThat(sqlLine.getOpts().getConfirm(), is(false));
     final ByteArrayOutputStream os = new ByteArrayOutputStream();
 
-    begin(line, os, false, "-e",
+    begin(sqlLine, os, false, "-e",
         "!set confirmPattern \"^(?i:(TRUNCATE|ALTER))\"");
-    assertThat(line.getOpts().getConfirmPattern(),
+    assertThat(sqlLine.getOpts().getConfirmPattern(),
         is("^(?i:(TRUNCATE|ALTER))"));
 
-    begin(line, os, false, "-e", "!set confirmPattern default");
-    assertThat(line.getOpts().getConfirmPattern(),
-        is(line.loc("default-confirm-pattern")));
+    begin(sqlLine, os, false, "-e", "!set confirmPattern default");
+    assertThat(sqlLine.getOpts().getConfirmPattern(),
+        is(sqlLine.loc("default-confirm-pattern")));
   }
 
   /**
@@ -2509,18 +2979,418 @@ public class SqlLineArgsTest {
   @Test
   public void testExceptionConfirmPattern() {
     try {
-      final SqlLine line = new SqlLine();
       final ByteArrayOutputStream os = new ByteArrayOutputStream();
-      assertThat(line.getOpts().getConfirm(), is(false));
+      assertThat(sqlLine.getOpts().getConfirm(), is(false));
       SqlLine.Status status =
-          begin(line, os, false, "-e",
+          begin(sqlLine, os, false, "-e",
               "!set confirmPattern \"^(?i*:(TRUNCATE|ALTER))\"");
-      assertThat(status, equalTo(SqlLine.Status.OK));
+      assertThat(status, equalTo(SqlLine.Status.OTHER));
       assertThat(os.toString("UTF8"), containsString("invalid regex"));
       os.reset();
     } catch (Throwable e) {
       // fail
       throw new RuntimeException(e);
+    }
+  }
+
+  @ParameterizedTest
+  @MethodSource("commandProvider")
+  public void testErrorStatusForSingleLineExecution(
+      String line, String expectedOutput, SqlLine.Status expectedStatus) {
+    try {
+      final ByteArrayOutputStream os = new ByteArrayOutputStream();
+      SqlLine.Status status =
+          begin(sqlLine, os, false, "-e", line);
+      assertEquals(status, expectedStatus);
+      assertThat(os.toString("UTF8"), containsString(expectedOutput));
+      os.reset();
+    } catch (Throwable e) {
+      // fail
+      fail(e);
+    }
+  }
+
+  static Stream<Arguments> commandProvider() {
+    return Stream.of(
+        of("!set non-existing-property test",
+            "does not exist", SqlLine.Status.OTHER),
+        of("!non-existing-command", "Unknown command", SqlLine.Status.OTHER),
+
+        // OK
+        of("!set confirmPattern \"^(?i:(TRUNCATE|ALTER))\"",
+            "", SqlLine.Status.OK),
+        of("!history", "", SqlLine.Status.OK),
+        of("!quit", "", SqlLine.Status.OK)
+    );
+  }
+
+  @Test
+  public void testInitArgsForUserNameAndPasswordWithSpaces() {
+    try {
+      final DatabaseConnection[] databaseConnection = new DatabaseConnection[1];
+      new MockUp<sqlline.DatabaseConnections>() {
+        @Mock
+        public void setConnection(DatabaseConnection connection) {
+          databaseConnection[0] = connection;
+        }
+      };
+
+      ByteArrayOutputStream os = new ByteArrayOutputStream();
+      String[] connectionArgs = new String[]{
+          "-u", ConnectionSpec.H2.url, "-n", "\"user'\\\" name\"",
+          "-p", "\"user \\\"'\\\"password\"",
+          "-e", "!set maxwidth 80"};
+      begin(sqlLine, os, false, connectionArgs);
+
+      assertEquals(ConnectionSpec.H2.url, databaseConnection[0].getUrl());
+      Properties infoProperties =
+          FieldReflection.getFieldValue(
+              databaseConnection[0].getClass().getDeclaredField("info"),
+              databaseConnection[0]);
+      assertNotNull(infoProperties);
+      assertEquals("user'\" name", infoProperties.getProperty("user"));
+      assertEquals("user \"'\"password",
+          infoProperties.getProperty("password"));
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testInitArgsForSuccessConnection() {
+    try {
+      final String[] nicknames = new String[1];
+      new MockUp<sqlline.DatabaseConnection>() {
+        @Mock
+        void setNickname(String nickname) {
+          nicknames[0] = nickname;
+        }
+      };
+      ByteArrayOutputStream os = new ByteArrayOutputStream();
+      final String filename = "file' with spaces";
+      String[] connectionArgs = {
+          "-u", ConnectionSpec.H2.url,
+          "-n", ConnectionSpec.H2.username,
+          "-p", ConnectionSpec.H2.password,
+          "-nn", "nickname with spaces",
+          "-log", "target" + File.separator + filename,
+          "-e", "!set maxwidth 80"};
+      begin(sqlLine, os, false, connectionArgs);
+
+      assertThat("file with spaces",
+          Files.exists(Paths.get("target", filename)));
+      assertEquals("nickname with spaces", nicknames[0]);
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testInitArgsForSuccessConnectionWithUserPassInUrl() {
+    try {
+      final ByteArrayOutputStream os = new ByteArrayOutputStream();
+      final String[] connectionArgs = {
+          "-u", ConnectionSpec.H2.url
+              + ";user=" + ConnectionSpec.H2.username
+              + ";password=" + ConnectionSpec.H2.password,
+          "-e", "!set maxwidth 80"};
+      begin(sqlLine, os, false, connectionArgs);
+      assertThat(os.toString("UTF8"),
+          not(containsString("Duplicate property")));
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testInitArgsForSuccessConnectionWithUserInUrl() {
+    try {
+      new MockUp<sqlline.Commands>() {
+        @Mock
+        String readUsername(String url) {
+          return ConnectionSpec.H2.username;
+        }
+      };
+      final ByteArrayOutputStream os = new ByteArrayOutputStream();
+      final String[] connectionArgs = {
+          "-u", ConnectionSpec.H2.url
+              + ";user=" + ConnectionSpec.H2.username,
+          "-p", ConnectionSpec.H2.password,
+          " --connectInteractiveModes=useEmptyCredentials",
+          "-e", "!set maxwidth 80"};
+      begin(sqlLine, os, false, connectionArgs);
+      assertThat(os.toString("UTF8"),
+          allOf(not(containsString("Duplicate property")),
+              not(containsString(">...."))));
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testInitArgsWithInteractiveAskForUserPassword() {
+    try {
+      new MockUp<sqlline.Commands>() {
+        @Mock
+        String readUsername(String url) {
+          return ConnectionSpec.H2.username;
+        }
+      };
+      new MockUp<sqlline.Commands>() {
+        @Mock
+        String readPassword(String url) {
+          return ConnectionSpec.H2.password;
+        }
+      };
+      final ByteArrayOutputStream os = new ByteArrayOutputStream();
+      final String[] connectionArgs = {
+          "-u", ConnectionSpec.H2.url,
+          "-e", "!set maxwidth 80"};
+      begin(sqlLine, os, false, connectionArgs);
+      assertThat(os.toString("UTF8"),
+          allOf(not(containsString("Duplicate property")),
+              not(containsString(">....")),
+              not(containsString("Usage:"))));
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testInitArgsWithInteractiveAskForPassword() {
+    try {
+      new MockUp<sqlline.Commands>() {
+        @Mock
+        String readPassword(String url) {
+          return ConnectionSpec.H2.password;
+        }
+      };
+      final ByteArrayOutputStream os = new ByteArrayOutputStream();
+      final String[] connectionArgs = {
+          "-u", ConnectionSpec.H2.url,
+          "-n", ConnectionSpec.H2.username,
+          "-e", "!set maxwidth 80"};
+      begin(sqlLine, os, false, connectionArgs);
+      assertThat(os.toString("UTF8"),
+          allOf(not(containsString("Duplicate property")),
+              not(containsString("Usage:"))));
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testInitArgsWithInteractiveAskForUser() {
+    try {
+      new MockUp<sqlline.Commands>() {
+        @Mock
+        String readUsername(String url) {
+          return ConnectionSpec.H2.username;
+        }
+      };
+      final ByteArrayOutputStream os = new ByteArrayOutputStream();
+      final String[] connectionArgs = {
+          "-u", ConnectionSpec.H2.url,
+          "-p", ConnectionSpec.H2.password,
+          "-e", "!set maxwidth 80"};
+      begin(sqlLine, os, false, connectionArgs);
+      assertThat(os.toString("UTF8"),
+          allOf(not(containsString("Duplicate property")),
+              not(containsString("Usage:"))));
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testConnectForSavedConnections() {
+    final DatabaseConnection[] databaseConnection = new DatabaseConnection[1];
+    new MockUp<sqlline.DatabaseConnections>() {
+      @Mock
+      public void setConnection(DatabaseConnection connection) {
+        databaseConnection[0] = connection;
+      }
+    };
+
+    ByteArrayOutputStream os = new ByteArrayOutputStream();
+    final File tmpSavedConnections = createTempFile(
+        "tmpconfconnections", "temp");
+    try (BufferedWriter bw =
+        new BufferedWriter(
+            new OutputStreamWriter(
+                new FileOutputStream(tmpSavedConnections),
+                    StandardCharsets.UTF_8))) {
+      String connectionName = "myconnection";
+      bw.write(connectionName + ": \n"
+          + "  url: " + ConnectionSpec.H2.url + "\n"
+          + "  user: " + ConnectionSpec.H2.username + "\n"
+          + "  password: " + ConnectionSpec.H2.password + "\n");
+      bw.flush();
+      bw.close();
+
+      String[] connectionArgs = new String[]{
+          "-c", connectionName,
+          "--connectionConfig=" + tmpSavedConnections.getAbsolutePath(),
+          "-e", "!set maxwidth 80"};
+      SqlLine.Status status = begin(sqlLine, os, false, connectionArgs);
+      assertThat(status, equalTo(SqlLine.Status.OK));
+      assertEquals(ConnectionSpec.H2.url, databaseConnection[0].getUrl());
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testDropAll() {
+    try {
+      new MockUp<sqlline.Commands>() {
+        @Mock
+        int getUserAnswer(String question, int... allowedAnswers) {
+          return 'y';
+        }
+      };
+      assertThat(sqlLine.getOpts().getConfirm(), is(false));
+      assertThat(sqlLine.getOpts().getConfirmPattern(),
+          is(BuiltInProperty.CONFIRM_PATTERN.defaultValue()));
+      final String createScript = "CREATE SCHEMA TESTDROPALL_1;\n"
+          + "CREATE SCHEMA TESTDROPALL_2;\n"
+          + "CREATE SCHEMA TESTDROPALL_3;\n"
+          + "CREATE TABLE TESTDROPALL_1.TABLE_1(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_1.TABLE_2(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_2.TABLE_1(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_2.TABLE_2(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_3.TABLE_1(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_3.TABLE_2(pk int);\n";
+      checkScriptFile(createScript, true,
+          equalTo(SqlLine.Status.OK),
+          containsString(" "));
+      final String showTables = "!tables";
+      checkScriptFile(showTables, true, equalTo(SqlLine.Status.OK),
+          allOf(containsString("TESTDROPALL_1"),
+              containsString("TESTDROPALL_2"),
+              containsString("TESTDROPALL_3")));
+      String dropScript = "!dropall TESTDROPALL%\n";
+      checkScriptFile(dropScript, true,
+          equalTo(SqlLine.Status.OK),
+          containsString(" "));
+
+      checkScriptFile(showTables, true, equalTo(SqlLine.Status.OK),
+          allOf(containsString("INFORMATION_SCHEMA"),
+              not(containsString("TESTDROPALL_1")),
+              not(containsString("TESTDROPALL_2")),
+              not(containsString("TESTDROPALL_3"))));
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testDropAllForSpecificSchema() {
+    try {
+      new MockUp<sqlline.Commands>() {
+        @Mock
+        int getUserAnswer(String question, int... allowedAnswers) {
+          return 'y';
+        }
+      };
+      assertThat(sqlLine.getOpts().getConfirm(), is(false));
+      assertThat(sqlLine.getOpts().getConfirmPattern(),
+          is(BuiltInProperty.CONFIRM_PATTERN.defaultValue()));
+      final String createScript = "CREATE SCHEMA TESTDROPALL_SPECIFIC_1;\n"
+          + "CREATE SCHEMA TESTDROPALL_SPECIFIC_2;\n"
+          + "CREATE SCHEMA TESTDROPALL_SPECIFIC_3;\n"
+          + "CREATE TABLE TESTDROPALL_SPECIFIC_1.TABLE_1(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_SPECIFIC_1.TABLE_2(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_SPECIFIC_2.TABLE_1(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_SPECIFIC_2.TABLE_2(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_SPECIFIC_3.TABLE_1(pk int);\n"
+          + "CREATE TABLE TESTDROPALL_SPECIFIC_3.TABLE_2(pk int);\n";
+      checkScriptFile(createScript, true,
+          equalTo(SqlLine.Status.OK),
+          containsString(" "));
+      final String showTables = "!tables";
+      checkScriptFile(showTables, true, equalTo(SqlLine.Status.OK),
+          allOf(containsString("TESTDROPALL_SPECIFIC_1"),
+              containsString("TESTDROPALL_SPECIFIC_2"),
+              containsString("TESTDROPALL_SPECIFIC_3")));
+      String dropScript = "!dropall TESTDROPALL_SPECIFIC_1\n";
+      checkScriptFile(dropScript, true,
+          equalTo(SqlLine.Status.OK),
+          containsString(" "));
+
+      checkScriptFile(showTables, true, equalTo(SqlLine.Status.OK),
+          allOf(containsString("INFORMATION_SCHEMA"),
+              containsString("TESTDROPALL_SPECIFIC_2"),
+              containsString("TESTDROPALL_SPECIFIC_3"),
+              not(containsString("TESTDROPALL_SPECIFIC_1"))));
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+  }
+
+  @Test
+  public void testGlobalConfiguration() {
+    final File globalConnectionConf = createTempFile(
+            "tmpconfconnections", "temp");
+    Path confPath = Paths.get(globalConnectionConf.getAbsolutePath());
+    String connectionName = "myconnection";
+    try (BufferedWriter bw =
+                 new BufferedWriter(
+                         new OutputStreamWriter(
+                                 new FileOutputStream(globalConnectionConf),
+                                 StandardCharsets.UTF_8))) {
+      // In the connection configuration we write a global-conf: section
+      bw.write(ConnectionConfigParser.GLOBAL_CONFIG_NAME + ": \n"
+              + "  maxWidth:15\n"
+              + "  incremental:true\n"
+              + connectionName + ": \n"
+              + "  url: " + ConnectionSpec.H2.url + "\n"
+              + "  user: " + ConnectionSpec.H2.username + "\n"
+              + "  password: " + "somenonemptypw" + "\n");
+      bw.flush();
+      bw.close();
+    } catch (Throwable t) {
+      throw new RuntimeException(t);
+    }
+    try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
+      String[] connectionArgs = new String[]{
+          "-c", connectionName,
+          "--connectionConfig=" + globalConnectionConf.getAbsolutePath()};
+      SqlLine.Status status = begin(sqlLine, os, false, connectionArgs);
+      assertThat(status, equalTo(SqlLine.Status.OK));
+      DispatchCallback dc = new DispatchCallback();
+      sqlLine.runCommands(dc, "!connect -c "
+              + connectionName);
+      sqlLine.runCommands(dc, "values (123456789, 123456789)");
+      String output = os.toString("UTF8");
+      // Max widdth of the output should be 15 chars
+      String expected = "| 123456789   |";
+      assertThat(output, containsString(expected));
+      // This is longer than 15, so it should not be in the output.
+      String notExpected = "123456789   | 1";
+      assertThat(output, not(containsString(notExpected)));
+
+      sqlLine.runCommands(dc, "!set maxwidth 25");
+      // We can override the maxWidth later
+      sqlLine.runCommands(dc, "values (123456789, 123456789)");
+      output = os.toString("UTF8");
+      // It will write 25 chars.
+      expected = "| 123456789   | 1234567 |";
+      assertThat(output, containsString(expected));
+      // This is longer than 25, so it should not be in the output.
+      notExpected = "123456789   | 12345678";
+      assertThat(output, not(containsString(notExpected)));
+
+      sqlLine.runCommands(new DispatchCallback(), "!quit");
+      assertTrue(sqlLine.isExit());
+    } catch (Throwable t) {
+      // fail
+      throw new RuntimeException(t);
+    }
+    try {
+      Files.delete(confPath);
+    } catch (java.io.IOException e) {
+      e.printStackTrace();
     }
   }
 

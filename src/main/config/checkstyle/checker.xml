@@ -48,17 +48,20 @@
     <!-- Require package javadoc -->
   <module name="JavadocPackage"/>
 
-  <!-- Miscellaneous other checks (checker).         -->
-  <!-- See http://checkstyle.sf.net/config_misc.html -->
-    <!-- Require files to end with newline characters -->
-  <module name="NewlineAtEndOfFile">
-    <property name="lineSeparator" value="lf"/>
-  </module>
-
   <!-- Checks for whitespace (tree walker)                 -->
   <!-- See http://checkstyle.sf.net/config_whitespace.html -->
     <!-- No tabs allowed! -->
   <module name="FileTabCharacter"/>
+
+  <!-- Checks for Size Violations.                    -->
+  <!-- See http://checkstyle.sf.net/config_sizes.html -->
+  <!-- Lines cannot exceed 80 chars, except if they are hyperlinks
+       or strings (possibly preceded by '+' and followed by say '),'. -->
+  <module name="LineLength">
+    <property name="max" value="80"/>
+    <property name="fileExtensions" value="java"/>
+    <property name="ignorePattern" value="^import|@see|@link|href|^[ +]*&quot;.*&quot;[);,]*$"/>
+  </module>
 
   <module name="TreeWalker">
     <!-- Checks for blocks. You know, those {}'s         -->
@@ -217,15 +220,7 @@
       <property name="message" value="C-style comment"/>
     </module>
 
-    <!-- Checks for Size Violations.                    -->
-    <!-- See http://checkstyle.sf.net/config_sizes.html -->
-    <!-- Lines cannot exceed 80 chars, except if they are hyperlinks
-         or strings (possibly preceded by '+' and followed by say '),'. -->
-    <module name="LineLength">
-      <property name="max" value="80"/>
-      <property name="ignorePattern" value="^import|@see|@link|href|^[ +]*&quot;.*&quot;[);,]*$"/>
-    </module>
-      <!-- Over time, we will revise this down -->
+    <!-- Over time, we will revise this down -->
     <module name="MethodLength">
       <property name="max" value="390"/>
     </module>

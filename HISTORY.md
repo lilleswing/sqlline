@@ -1,6 +1,222 @@
 # SQLLine release history and change log
 
-For a full list of releases, see <a href="https://github.com/julianhyde/sqlline/releases">github</a>.
+For a full list of releases, see <a href="https://github.com/julianhyde/sqlline/releases">GitHub</a>.
+
+## <a href="https://github.com/julianhyde/sqlline/releases/tag/sqlline-1.12.0">1.12.0</a> (2021-11-07)
+
+Now sqlline works on Apple/M1 architecture
+<a href="https://github.com/julianhyde/sqlline/issues/444">SQLLINE-444</a>.
+
+This release requires Java version 8 or higher.
+
+Bugs and functional changes:
+
+* [<a href="https://github.com/julianhyde/sqlline/issues/447">SQLLINE-447</a>] 
+  Certain sequence of queries for JSON output format leads to 
+  ArrayIndexOutOfBoundsException
+* [<a href="https://github.com/julianhyde/sqlline/issues/436">SQLLINE-436</a>]
+  User configuration file for sqlline (Richard Antal)
+* [<a href="https://github.com/julianhyde/sqlline/issues/432">SQLLINE-432</a>]
+  Highlight decimal numbers when highlighting is on
+* [<a href="https://github.com/julianhyde/sqlline/issues/431">SQLLINE-431</a>]
+  Custom prompt handler should apply even if there is no connection 
+  The custom prompt handler is ignored until a connection is created; 
+  with no connection, prompt is always "sqlline> " (IceMimosa)
+
+Other:
+* [<a href="https://github.com/julianhyde/sqlline/issues/434">SQLLINE-434</a>]
+  Support JDK 14, 15, 16
+* [<a href="https://github.com/julianhyde/sqlline/issues/453">SQLLINE-453</a>]
+  Rename 'master' git branch to 'main'
+* [<a href="https://github.com/julianhyde/sqlline/issues/454">SQLLINE-454</a>]
+  Enable jdk17 in Travis
+* [<a href="https://github.com/julianhyde/sqlline/issues/444">SQLLINE-444</a>]
+  Update JLine to 3.21.0
+* Upgrades:
+  * checkstyle to 9.0.1
+  * forbiddenapis to 3.2
+  * junit to 5.8.1
+  * maven-checkstyle-plugin to 3.1.2
+  * maven-dependency-plugin to 3.2.0
+  * maven-enforcer-plugin to 3.0.0
+  * maven-javadoc-plugin to 3.3.1
+  * maven-project-info-reports-plugin to 3.1.2
+  * maven-gpg-plugin to 3.0.1
+
+## <a href="https://github.com/julianhyde/sqlline/releases/tag/sqlline-1.11.0">1.11.0</a> (2021-02-25)
+
+A patch to release 1.10.0, fixing one issue.
+
+This release requires Java version 8 or higher.
+
+Bugs and functional changes:
+
+* [<a href="https://github.com/julianhyde/sqlline/issues/425">SQLLINE-425</a>]
+  `!quit` command should return success
+
+## <a href="https://github.com/julianhyde/sqlline/releases/tag/sqlline-1.10.0">1.10.0</a> (2021-02-21)
+
+Pluggable [scripting engines](https://github.com/julianhyde/sqlline/issues/394)
+(to accommodate JDK 15).
+
+This release requires Java version 8 or higher.
+
+Bugs and functional changes:
+
+* [<a href="https://github.com/julianhyde/sqlline/issues/394">SQLLINE-394</a>]
+  Make script engine configurable via new `scriptEngine` property;
+  compensates for the fact that Nashorn is not available on JDK 15 and above
+* [<a href="https://github.com/julianhyde/sqlline/issues/419">SQLLINE-419</a>]
+  Allow empty string after connection name in config
+* [<a href="https://github.com/julianhyde/sqlline/issues/386">SQLLINE-386</a>]
+  Support saved connections
+* [<a href="https://github.com/julianhyde/sqlline/issues/415">SQLLINE-415</a>]
+  Switch off highlighting in manual; ignore case while searching through manual
+* [<a href="https://github.com/julianhyde/sqlline/issues/254">SQLLINE-254</a>]
+  Live templates support
+* [<a href="https://github.com/julianhyde/sqlline/issues/412">SQLLINE-412</a>]
+  Autocompletion for all properties with FILE_PATH type
+* [<a href="https://github.com/julianhyde/sqlline/issues/410">SQLLINE-410</a>]
+  Respect line separator while column size calculations
+* [<a href="https://github.com/julianhyde/sqlline/issues/157">SQLLINE-157</a>]
+  Column types in header
+* [<a href="https://github.com/julianhyde/sqlline/issues/391">SQLLINE-391</a>]
+  Set error code when `-e` command fails
+* [<a href="https://github.com/julianhyde/sqlline/issues/407">SQLLINE-407</a>]
+  Autocompletion for `!help` command
+* [<a href="https://github.com/julianhyde/sqlline/issues/336">SQLLINE-336</a>]
+  and
+  [<a href="https://github.com/julianhyde/sqlline/issues/376">SQLLINE-376</a>]
+  Support PL/SQL and PL/pgSQL queries, and ability to add similar support
+  for other dialects
+* [<a href="https://github.com/julianhyde/sqlline/issues/402">SQLLINE-402</a>]
+  Table styles for table output format
+* [<a href="https://github.com/julianhyde/sqlline/issues/361">SQLLINE-361</a>]
+  Support patterns for tables, columns, procedures; add parameter support for
+  `!tables`, `!columns`, `!indexes`, `!primarykeys`, and `!procedures`
+  commands
+* [<a href="https://github.com/julianhyde/sqlline/issues/378">SQLLINE-378</a>]
+  Check for silent property before outputting info message; `--no-` prefix for
+  string properties is handled as empty if empty value is allowed for that
+  property; `--silent` as input parameter makes prompts empty
+* [<a href="https://github.com/julianhyde/sqlline/issues/389">SQLLINE-389</a>]
+  Respect all properties from properties file
+* [<a href="https://github.com/julianhyde/sqlline/issues/395">SQLLINE-395</a>]
+  Enable autopairing JLine feature
+* [<a href="https://github.com/julianhyde/sqlline/issues/355">SQLLINE-355</a>]
+  Colours in default and script prompts
+* [<a href="https://github.com/julianhyde/sqlline/issues/388">SQLLINE-388</a>]
+  Use `outputstream` instead of `System.out`
+* [<a href="https://github.com/julianhyde/sqlline/issues/379">SQLLINE-379</a>]
+  DB2 JDBC driver throws if SQLLine attempts to call `ResultSet.next` after
+  last row
+* [<a href="https://github.com/julianhyde/sqlline/issues/362">SQLLINE-362</a>]
+  Add completion for `!go` command
+* [<a href="https://github.com/julianhyde/sqlline/issues/367">SQLLINE-367</a>]
+  `!resize` command and `autoResize` property
+
+Build and tests:
+* Make `SqlLineParserTest` using parameterized tests
+* Make tests for
+  [<a href="https://github.com/julianhyde/sqlline/issues/354">SQLLINE-354</a>]
+  work on Windows
+
+Other:
+* Document that the `promptscript` property is broken in JDK 15, per
+  [<a href="https://github.com/julianhyde/sqlline/issues/394">SQLLINE-394</a>]
+  (but see the new `scriptEngine` property)
+* [<a href="https://github.com/julianhyde/sqlline/issues/392">SQLLINE-392</a>]
+  Add JDBC url templates for Hiveserver2
+* Regenerate web site for sqlline-1.9.0
+* [<a href="https://github.com/julianhyde/sqlline/issues/380">SQLLINE-380</a>]
+  Add Maven wrapper, so that people may build using "./mvnw"
+* Upgrades:
+  * [<a href="https://github.com/julianhyde/sqlline/issues/417">SQLLINE-417</a>]
+    Update JLine to 3.18.0, add geshi color scheme
+  * [<a href="https://github.com/julianhyde/sqlline/issues/421">SQLLINE-421</a>]
+    Require Maven 3.2.3 or higher
+  * [<a href="https://github.com/julianhyde/sqlline/issues/382">SQLLINE-382</a>]
+    Update JLine3 to 3.16.0
+  * Bump checkstyle from 8.23 to 8.29
+
+## <a href="https://github.com/julianhyde/sqlline/releases/tag/sqlline-1.9.0">1.9.0</a> (2019-10-16)
+
+There are several improvements regarding user interaction, such as
+<a href="https://github.com/julianhyde/sqlline/issues/323">line numbers support</a>,
+<a href="https://github.com/julianhyde/sqlline/issues/317">long query
+editing which take more than a screen</a>,
+and improvements for autocompletion
+(<a href="https://github.com/julianhyde/sqlline/issues/331">autocompletion
+for schema, table, column names</a>
+and <a href="https://github.com/julianhyde/sqlline/issues/314">show
+description for completion candidates</a>).
+
+Now there is also a
+<a href="https://github.com/julianhyde/sqlline/wiki/Demos">demo page</a>
+for some of sqlline's features.
+
+This release requires Java version 8 or higher.
+
+Bugs and functional changes:
+
+* Autocompletion improvements
+  * [<a href="https://github.com/julianhyde/sqlline/issues/331">SQLLINE-331</a>]
+    Autocompletion for schema, table, column names
+  * [<a href="https://github.com/julianhyde/sqlline/issues/314">SQLLINE-314</a>]
+    Description for command name completion candidates depending on
+    `showCompletionDesc` property value
+* [<a href="https://github.com/julianhyde/sqlline/issues/326">SQLLINE-326</a>]
+  Respect `user`, `password` properties in connection url;
+  add `connectInteractionMode` property
+* [<a href="https://github.com/julianhyde/sqlline/issues/354">SQLLINE-354</a>]
+  Use minimum possible `width` if calculated is negative
+* [<a href="https://github.com/julianhyde/sqlline/issues/332">SQLLINE-332</a>]
+  Add `historyFlags` property to customize `!history` output
+* [<a href="https://github.com/julianhyde/sqlline/issues/343">SQLLINE-343</a>]
+  Use batches accordingly
+* [<a href="https://github.com/julianhyde/sqlline/issues/337">SQLLINE-337</a>]
+  Move connection information to debug level of tracing
+* Add `setReadOnly` connection option (iconeb)
+* [<a href="https://github.com/julianhyde/sqlline/issues/248">SQLLINE-248</a>]
+  `!dropall` for specific schemas
+* [<a href="https://github.com/julianhyde/sqlline/issues/327">SQLLINE-327</a>]
+  `!reconnect` should respect `fastconnect` property value
+* [<a href="https://github.com/julianhyde/sqlline/issues/321">SQLLINE-321</a>]
+  Ansiconsole outputformat
+* [<a href="https://github.com/julianhyde/sqlline/issues/323">SQLLINE-323</a>]
+  Add line numbers support
+* [<a href="https://github.com/julianhyde/sqlline/issues/306">SQLLINE-306</a>]
+  Turn off menu because of issue mentioned in #306
+* [<a href="https://github.com/julianhyde/sqlline/issues/312">SQLLINE-312</a>]
+  Show error if there are wrong arguments for `!metadata` methods
+* [<a href="https://github.com/julianhyde/sqlline/issues/309">SQLLINE-309</a>]
+  Fix highlighting of sqlline commands with quoted arguments
+* [<a href="https://github.com/julianhyde/sqlline/issues/305">SQLLINE-305</a>]
+  Posix compatibility for double quotes to allow spaces inside command arguments
+* [<a href="https://github.com/julianhyde/sqlline/issues/310">SQLLINE-310</a>]
+  `!schemas` command
+* [<a href="https://github.com/julianhyde/sqlline/issues/318">SQLLINE-318</a>]
+  Correct highlighting and line continuation for '`/*/`'
+* [<a href="https://github.com/julianhyde/sqlline/issues/340">SQLLINE-340</a>]
+  Rethrow `SQLException` from `DatabaseMetaDataHandler` if it is the cause
+
+Other:
+* [<a href="https://github.com/julianhyde/sqlline/issues/316">SQLLINE-316</a>]
+  Link to demos page
+* [<a href="https://github.com/julianhyde/sqlline/issues/302">SQLLINE-302</a>]
+  Make tests run with their own `sqlline.properties` via `propertiesFile` property;
+  remove all instantiations of `SqlLine` from `PromptTest`
+* [<a href="https://github.com/julianhyde/sqlline/issues/210">SQLLINE-210</a>]
+  Add property to skip doc generation
+* Upgrades:
+  * Update JLine3 to 3.12.1
+  * Update Checkstyle to 8.23
+  * Update Jmockit to 1.48
+  * Update Junit to 5.5.1
+  * Update maven-jar-plugin to 3.1.2
+  * Update maven-surefire-plugin to 2.22.2
+  * Update hsqldb up to 2.5.0
+  * Update h2 up to 1.4.199
 
 ## <a href="https://github.com/julianhyde/sqlline/releases/tag/sqlline-1.8.0">1.8.0</a> (2019-05-30)
 

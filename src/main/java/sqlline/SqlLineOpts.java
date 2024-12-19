@@ -12,6 +12,9 @@
 package sqlline;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.text.NumberFormat;
@@ -20,6 +23,8 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
+import javax.script.ScriptEngine;
+import javax.script.ScriptEngineManager;
 
 import org.jline.builtins.Completers;
 import org.jline.keymap.KeyMap;
@@ -35,11 +40,16 @@ import org.jline.reader.impl.history.DefaultHistory;
 import sqlline.SqlLineProperty.Type;
 
 import static sqlline.BuiltInProperty.AUTO_COMMIT;
+import static sqlline.BuiltInProperty.AUTO_PAIRING;
+import static sqlline.BuiltInProperty.AUTO_RESIZE;
+import static sqlline.BuiltInProperty.HISTORY_FLAGS;
+import static sqlline.BuiltInProperty.READ_ONLY;
 import static sqlline.BuiltInProperty.AUTO_SAVE;
 import static sqlline.BuiltInProperty.COLOR;
 import static sqlline.BuiltInProperty.COLOR_SCHEME;
 import static sqlline.BuiltInProperty.CONFIRM;
 import static sqlline.BuiltInProperty.CONFIRM_PATTERN;
+import static sqlline.BuiltInProperty.CONNECTION_CONFIG;
 import static sqlline.BuiltInProperty.CSV_DELIMITER;
 import static sqlline.BuiltInProperty.CSV_QUOTE_CHARACTER;
 import static sqlline.BuiltInProperty.DATE_FORMAT;
@@ -52,6 +62,8 @@ import static sqlline.BuiltInProperty.HISTORY_FILE;
 import static sqlline.BuiltInProperty.INCREMENTAL;
 import static sqlline.BuiltInProperty.INCREMENTAL_BUFFER_ROWS;
 import static sqlline.BuiltInProperty.ISOLATION;
+import static sqlline.BuiltInProperty.KEEP_SEMICOLON;
+import static sqlline.BuiltInProperty.LIVE_TEMPLATES;
 import static sqlline.BuiltInProperty.MAX_COLUMN_WIDTH;
 import static sqlline.BuiltInProperty.MAX_HEIGHT;
 import static sqlline.BuiltInProperty.MAX_HISTORY_FILE_ROWS;
@@ -62,14 +74,20 @@ import static sqlline.BuiltInProperty.NULL_VALUE;
 import static sqlline.BuiltInProperty.NUMBER_FORMAT;
 import static sqlline.BuiltInProperty.OUTPUT_FORMAT;
 import static sqlline.BuiltInProperty.PROMPT;
+import static sqlline.BuiltInProperty.PROPERTIES_FILE;
 import static sqlline.BuiltInProperty.RIGHT_PROMPT;
 import static sqlline.BuiltInProperty.ROW_LIMIT;
+import static sqlline.BuiltInProperty.SCRIPT_ENGINE;
+import static sqlline.BuiltInProperty.SHOW_COMPLETION_DESCR;
 import static sqlline.BuiltInProperty.SHOW_ELAPSED_TIME;
 import static sqlline.BuiltInProperty.SHOW_HEADER;
+import static sqlline.BuiltInProperty.SHOW_LINE_NUMBERS;
 import static sqlline.BuiltInProperty.SHOW_NESTED_ERRS;
+import static sqlline.BuiltInProperty.SHOW_TYPES;
 import static sqlline.BuiltInProperty.SHOW_WARNINGS;
 import static sqlline.BuiltInProperty.SILENT;
 import static sqlline.BuiltInProperty.STRICT_JDBC;
+import static sqlline.BuiltInProperty.TABLE_STYLE;
 import static sqlline.BuiltInProperty.TIMEOUT;
 import static sqlline.BuiltInProperty.TIMESTAMP_FORMAT;
 import static sqlline.BuiltInProperty.TIME_FORMAT;
@@ -85,8 +103,8 @@ public class SqlLineOpts implements Completer {
   public static final String PROPERTY_NAME_EXIT =
       PROPERTY_PREFIX + "system.exit";
   private static final Date TEST_DATE = new Date();
-  private SqlLine sqlLine;
-  private File rcFile = new File(saveDir(), "sqlline.properties");
+  private static final String DEV_NULL = "/dev/null";
+  private final SqlLine sqlLine;
   private String runFile;
   private Pattern compiledConfirmPattern = null;
   private Set<String> propertyNames;
@@ -100,17 +118,25 @@ public class SqlLineOpts implements Completer {
       Collections.unmodifiableMap(
           new HashMap<SqlLineProperty, SqlLineProperty.Writer>() {
             {
+              put(AUTO_PAIRING, SqlLineOpts.this::setAutoPairing);
               put(COLOR_SCHEME, SqlLineOpts.this::setColorScheme);
               put(CONFIRM_PATTERN, SqlLineOpts.this::setConfirmPattern);
+              put(CONNECTION_CONFIG, SqlLineOpts.this::setConnectionConfig);
               put(CSV_QUOTE_CHARACTER, SqlLineOpts.this::setCsvQuoteCharacter);
               put(DATE_FORMAT, SqlLineOpts.this::setDateFormat);
               put(HISTORY_FILE, SqlLineOpts.this::setHistoryFile);
+              put(LIVE_TEMPLATES, SqlLineOpts.this::setLiveTemplatesFile);
               put(MAX_HISTORY_FILE_ROWS,
                   SqlLineOpts.this::setMaxHistoryFileRows);
               put(MAX_HISTORY_ROWS, SqlLineOpts.this::setMaxHistoryRows);
               put(MODE, SqlLineOpts.this::setMode);
               put(NUMBER_FORMAT, SqlLineOpts.this::setNumberFormat);
               put(OUTPUT_FORMAT, SqlLineOpts.this::setOutputFormat);
+              put(PROPERTIES_FILE, SqlLineOpts.this::setPropertiesFile);
+              put(SCRIPT_ENGINE, SqlLineOpts.this::setScriptEngine);
+              put(SHOW_COMPLETION_DESCR,
+                  SqlLineOpts.this::setShowCompletionDesc);
+              put(TABLE_STYLE, SqlLineOpts.this::setTableStyle);
               put(TIME_FORMAT, SqlLineOpts.this::setTimeFormat);
               put(TIMESTAMP_FORMAT, SqlLineOpts.this::setTimestampFormat);
             }
@@ -146,8 +172,13 @@ public class SqlLineOpts implements Completer {
       Map<BuiltInProperty, Collection<String>> customCompletions) {
     Map<String, Completer> comp = new HashMap<>();
     final String start = "START";
-    comp.put(start, new StringsCompleter("!set"));
+    comp.put(start,
+        new StringsCompleter(
+            new SqlLineCommandCompleter.SqlLineCandidate(sqlLine, "!set",
+                "!set", sqlLine.loc("command-name"), sqlLine.loc("help-set"),
+                null, "!set", true)));
     Collection<BuiltInProperty> booleanProperties = new ArrayList<>();
+    Collection<BuiltInProperty> filePathProperties = new ArrayList<>();
     Collection<BuiltInProperty> withDefinedAvailableValues = new ArrayList<>();
     StringBuilder sb = new StringBuilder(start + " (");
     for (BuiltInProperty property : BuiltInProperty.values()) {
@@ -157,26 +188,20 @@ public class SqlLineOpts implements Completer {
         withDefinedAvailableValues.add(property);
       } else if (property.type() == Type.BOOLEAN) {
         booleanProperties.add(property);
+      } else if (property.type() == Type.FILE_PATH) {
+        filePathProperties.add(property);
       } else {
         sb.append(property.name()).append(" | ");
         comp.put(property.name(),
             new StringsCompleter(property.propertyName()));
       }
     }
-    // all boolean properties without defined available values and
-    // not customized via {@code customCompletions} have values
-    // for autocompletion specified in SqlLineProperty.BOOLEAN_VALUES
-    final String booleanTypeString = Type.BOOLEAN.toString();
-    sb.append(booleanTypeString);
-    comp.put(booleanTypeString,
-        new StringsCompleter(booleanProperties
-            .stream()
-            .map(BuiltInProperty::propertyName)
-            .toArray(String[]::new)));
-    final String booleanPropertyValueKey = booleanTypeString + "_value";
-    comp.put(booleanPropertyValueKey,
+    addCompletionForProperties(sb, comp, Type.FILE_PATH,
+        filePathProperties, new Completers.FileNameCompleter());
+    sb.append(" | ");
+    addCompletionForProperties(sb, comp, Type.BOOLEAN, booleanProperties,
         new StringsCompleter(BuiltInProperty.BOOLEAN_VALUES));
-    sb.append(" ").append(booleanPropertyValueKey);
+
     // If a property has defined values they will be used for autocompletion
     for (BuiltInProperty property : withDefinedAvailableValues) {
       final String propertyName = property.propertyName();
@@ -201,6 +226,29 @@ public class SqlLineOpts implements Completer {
     sb.append(") ");
     return Collections.singletonList(
         new Completers.RegexCompleter(sb.toString(), comp::get));
+  }
+
+  private void addCompletionForProperties(StringBuilder syntax,
+      Map<String, Completer> completerMap,
+      Type type, Collection<BuiltInProperty> properties,
+      Completer completer) {
+    final String typeStringName = type.toString();
+    syntax.append(typeStringName);
+    completerMap.put(typeStringName,
+        new StringsCompleter(properties
+            .stream()
+            .map(BuiltInProperty::propertyName)
+            .toArray(String[]::new)));
+    final String filenamePropertyValueKey = typeStringName + "_value";
+    completerMap.put(filenamePropertyValueKey, completer);
+    syntax.append(" ").append(filenamePropertyValueKey);
+  }
+
+  public List<Completer> helpCompleters() {
+    Set<String> commands = sqlLine.getCommandHandlers().stream()
+        .flatMap(t -> t.getNames().stream())
+        .collect(Collectors.toSet());
+    return Collections.singletonList(new StringsCompleter(commands));
   }
 
   /**
@@ -248,7 +296,12 @@ public class SqlLineOpts implements Completer {
   }
 
   public void save() throws IOException {
-    OutputStream out = new FileOutputStream(rcFile);
+    final String pathToPropertyFile = get(PROPERTIES_FILE);
+    if (DEV_NULL.equals(pathToPropertyFile)) {
+      sqlLine.error(sqlLine.loc("saving-to-dev-null-not-supported"));
+      return;
+    }
+    OutputStream out = new FileOutputStream(pathToPropertyFile);
     save(out);
     out.close();
   }
@@ -295,6 +348,7 @@ public class SqlLineOpts implements Completer {
   }
 
   public void load() throws IOException {
+    final File rcFile = new File(getPropertiesFile());
     if (rcFile.exists()) {
       InputStream in = new FileInputStream(rcFile);
       load(in);
@@ -315,20 +369,13 @@ public class SqlLineOpts implements Completer {
         continue;
       }
       if (key.startsWith(PROPERTY_PREFIX)) {
-        set(key.substring(PROPERTY_PREFIX.length()), props.getProperty(key));
+        set(key.substring(PROPERTY_PREFIX.length()),
+            props.getProperty(key), false);
       }
     }
   }
 
-  public void set(String key, String value) {
-    set(key, value, false);
-  }
-
-  public boolean set(String key, String value, boolean quiet) {
-    if ("run".equals(key)) {
-      setRun(value);
-      return true;
-    }
+  private SqlLineProperty getSqlLineProperty(String key, boolean quiet) {
     final SqlLineProperty property = BuiltInProperty.valueOf(key, true);
     if (property == null) {
       if (!quiet) {
@@ -339,6 +386,49 @@ public class SqlLineOpts implements Completer {
         // arbitrary order.
         System.err.println(sqlLine.loc("unknown-prop", key));
       }
+      return null;
+    }
+    return property;
+  }
+
+  public boolean setEmptyValue(String key, boolean quiet) {
+    final SqlLineProperty property = getSqlLineProperty(key, quiet);
+    if (property == null) {
+      return false;
+    }
+    if (property.type() == Type.STRING || property.type() == Type.FILE_PATH) {
+      set(property, "");
+      return true;
+    } else {
+      sqlLine.error(sqlLine.loc("empty-value-not-supported", property.type()));
+    }
+    return false;
+  }
+
+  public void set(String key, String value) {
+    set(key, value, false);
+  }
+
+  public boolean set(String key, boolean value, boolean quiet) {
+    final SqlLineProperty property = getSqlLineProperty(key, true);
+    if (property == null || property.type() != Type.BOOLEAN) {
+      sqlLine.error(sqlLine.loc("no-prop-not-supported", key));
+      return false;
+    }
+    if (property == SILENT) {
+      set(PROMPT, "");
+      set(RIGHT_PROMPT, "");
+    }
+    return set(key, String.valueOf(value), quiet);
+  }
+
+  public boolean set(String key, String value, boolean quiet) {
+    if ("run".equals(key)) {
+      setRun(value);
+      return true;
+    }
+    final SqlLineProperty property = getSqlLineProperty(key, true);
+    if (property == null) {
       return false;
     }
     if (property.isReadOnly()) {
@@ -431,12 +521,14 @@ public class SqlLineOpts implements Completer {
     Object valueToSet = value;
     String strValue;
     switch (key.type()) {
+    case FILE_PATH:
     case STRING:
       strValue = value instanceof String
           ? (String) value : String.valueOf(value);
       valueToSet = DEFAULT.equalsIgnoreCase(strValue)
           ? key.defaultValue() : value;
-      if (!key.getAvailableValues().isEmpty()
+      if (!DEFAULT.equalsIgnoreCase(strValue)
+          && !key.getAvailableValues().isEmpty()
           && !key.getAvailableValues().contains(valueToSet.toString())) {
         sqlLine.error(
             sqlLine.loc("unknown-value",
@@ -464,14 +556,18 @@ public class SqlLineOpts implements Completer {
         valueToSet = value;
       } else {
         strValue = String.valueOf(value);
-        valueToSet = "true".equalsIgnoreCase(strValue)
-            || "1".equalsIgnoreCase(strValue)
-            || "on".equalsIgnoreCase(strValue)
-            || "yes".equalsIgnoreCase(strValue);
+        valueToSet = evaluateBoolean(strValue);
       }
       break;
     }
     propertiesMap.put(key, valueToSet);
+  }
+
+  private boolean evaluateBoolean(String value) {
+    return "true".equalsIgnoreCase(value)
+            || "1".equalsIgnoreCase(value)
+            || "on".equalsIgnoreCase(value)
+            || "yes".equalsIgnoreCase(value);
   }
 
   public boolean getFastConnect() {
@@ -480,6 +576,10 @@ public class SqlLineOpts implements Completer {
 
   public boolean getAutoCommit() {
     return getBoolean(AUTO_COMMIT);
+  }
+
+  public boolean getReadOnly() {
+    return getBoolean(READ_ONLY);
   }
 
   public boolean getVerbose() {
@@ -494,8 +594,16 @@ public class SqlLineOpts implements Completer {
     return getBoolean(SHOW_WARNINGS);
   }
 
+  public boolean getShowCompletionDescr() {
+    return getBoolean(SHOW_COMPLETION_DESCR);
+  }
+
   public boolean getShowNestedErrs() {
     return getBoolean(SHOW_NESTED_ERRS);
+  }
+
+  public boolean getShowTypes() {
+    return getBoolean(SHOW_TYPES);
   }
 
   public String getNumberFormat() {
@@ -544,6 +652,10 @@ public class SqlLineOpts implements Completer {
   public void setTimestampFormat(String timestampFormat) {
     set(TIMESTAMP_FORMAT,
         getValidDateTimePatternOrThrow(timestampFormat));
+  }
+
+  public void setShowCompletionDesc(String setShowCompletionDesc) {
+    set(SHOW_COMPLETION_DESCR, setShowCompletionDesc);
   }
 
   public String getNullValue() {
@@ -615,6 +727,27 @@ public class SqlLineOpts implements Completer {
 
   public boolean getColor() {
     return getBoolean(COLOR);
+  }
+
+  public String getConnectionConfig() {
+    return get(CONNECTION_CONFIG);
+  }
+
+  public void setConnectionConfig(String filename) {
+    if (filename == null || filename.isEmpty()) {
+      return;
+    }
+    if (DEFAULT.equalsIgnoreCase(filename)) {
+      set(CONNECTION_CONFIG, DEFAULT);
+      return;
+    }
+    Path path = Paths.get(filename);
+    if (!Files.exists(path) || Files.isDirectory(path)) {
+      sqlLine.error(sqlLine.loc("no-file", filename));
+      return;
+    }
+    set(CONNECTION_CONFIG, filename);
+    sqlLine.getCommands().resetconfconnections();
   }
 
   public String getCsvDelimiter() {
@@ -728,6 +861,23 @@ public class SqlLineOpts implements Completer {
     return getBoolean(AUTO_SAVE);
   }
 
+  public boolean getAutoPairing() {
+    return getBoolean(AUTO_PAIRING);
+  }
+
+  public void setAutoPairing(String newValue) {
+    set(AUTO_PAIRING, newValue);
+    sqlLine.toggleJlineAutopairWidget(evaluateBoolean(newValue));
+  }
+
+  public boolean getAutoResize() {
+    return getBoolean(AUTO_RESIZE);
+  }
+
+  public boolean getShowLineNumbers() {
+    return getBoolean(SHOW_LINE_NUMBERS);
+  }
+
   public String getOutputFormat() {
     return get(OUTPUT_FORMAT);
   }
@@ -744,6 +894,10 @@ public class SqlLineOpts implements Completer {
     return getBoolean(TRIM_SCRIPTS);
   }
 
+  public boolean getKeepSemicolon() {
+    return getBoolean(KEEP_SEMICOLON);
+  }
+
   public int getMaxHeight() {
     return getInt(MAX_HEIGHT);
   }
@@ -758,6 +912,30 @@ public class SqlLineOpts implements Completer {
 
   public boolean getUseLineContinuation() {
     return getBoolean(USE_LINE_CONTINUATION);
+  }
+
+  public String getLiveTemplatesFile() {
+    return get(LIVE_TEMPLATES);
+  }
+
+  public void setLiveTemplatesFile(String fileName) {
+    final String currentValue = get(LIVE_TEMPLATES);
+    final String newValue = Commands.expand(fileName);
+    if (Objects.equals(currentValue, fileName)
+        || Objects.equals(currentValue, newValue)) {
+      return;
+    }
+    if (DEFAULT.equalsIgnoreCase(fileName)) {
+      set(LIVE_TEMPLATES, LIVE_TEMPLATES.defaultValue());
+    } else {
+      Path path = Paths.get(newValue);
+      if (!Files.exists(path) || Files.isDirectory(path)) {
+        sqlLine.error(sqlLine.loc("no-file", fileName));
+        return;
+      }
+      set(LIVE_TEMPLATES, newValue);
+    }
+    ((SqlLineExpander) sqlLine.getLineReader().getExpander()).reset();
   }
 
   public String getMode() {
@@ -807,12 +985,47 @@ public class SqlLineOpts implements Completer {
     }
   }
 
+  public void setTableStyle(String tableStyle) {
+    if (DEFAULT.equals(tableStyle)
+        || BuiltInTableOutputFormatStyles.BY_NAME.containsKey(tableStyle)) {
+      propertiesMap.put(TABLE_STYLE, tableStyle);
+      return;
+    }
+    sqlLine.error(
+        sqlLine.loc("unknown-value", TABLE_STYLE.propertyName(), tableStyle,
+            TABLE_STYLE.getAvailableValues()));
+  }
+
+  public String getTableStyle() {
+    return get(TABLE_STYLE);
+  }
+
   public boolean getStrictJdbc() {
     return getBoolean(STRICT_JDBC);
   }
 
-  public File getPropertiesFile() {
-    return rcFile;
+  public String getPropertiesFile() {
+    return get(PROPERTIES_FILE);
+  }
+
+  public void setPropertiesFile(String propertyFile) {
+    final String oldPropertyFile = get(PROPERTIES_FILE);
+    if (Objects.equals(propertyFile, oldPropertyFile)
+        || Objects.equals(PROPERTIES_FILE.defaultValue(), oldPropertyFile)
+            && DEFAULT.equalsIgnoreCase(propertyFile)) {
+      return;
+    }
+    // reset properties
+    propertiesMap.clear();
+    set(PROPERTIES_FILE, propertyFile);
+    if (DEV_NULL.equals(propertyFile)) {
+      return;
+    }
+    try {
+      load();
+    } catch (IOException e) {
+      sqlLine.handleException(e);
+    }
   }
 
   public void setRun(String runFile) {
@@ -870,6 +1083,28 @@ public class SqlLineOpts implements Completer {
       compiledConfirmPattern = Pattern.compile(getConfirmPattern());
     }
     return compiledConfirmPattern;
+  }
+
+  public String getHistoryFlags() {
+    return get(HISTORY_FLAGS);
+  }
+
+  public String getScriptEngine() {
+    return get(SCRIPT_ENGINE);
+  }
+
+  public void setScriptEngine(String engineName) {
+    if (DEFAULT.equalsIgnoreCase(engineName)) {
+      set(SCRIPT_ENGINE, SCRIPT_ENGINE.defaultValue());
+      return;
+    }
+    final ScriptEngineManager engineManager = new ScriptEngineManager();
+    ScriptEngine scriptEngine = engineManager.getEngineByName(engineName);
+    if (scriptEngine == null && engineManager.getEngineFactories().isEmpty()) {
+      sqlLine.error(sqlLine.loc("not-supported-script-engine-no-available",
+          engineName));
+    }
+    set(SCRIPT_ENGINE, engineName);
   }
 }
 

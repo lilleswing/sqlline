@@ -27,14 +27,18 @@ class DialectImpl implements Dialect {
   private final char openQuote;
   private final char closeQuote;
   private final boolean storesUpperCaseIdentifier;
+  private final boolean storesLowerCaseIdentifier;
+  private final String extraNameCharacters;
+  private final CodeBlocks codeBlocks;
 
   static DialectImpl create(Set<String> keywords, String identifierQuote,
       String productName) {
-    return create(keywords, identifierQuote, productName, true);
+    return create(keywords, identifierQuote, productName, false, true, "");
   }
 
   static DialectImpl create(Set<String> keywords, String identifierQuote,
-      String productName, boolean storesUpperCaseIdentifier) {
+      String productName, boolean storesLowerCaseIdentifier,
+      boolean storesUpperCaseIdentifier, String extraNameCharacters) {
     final Set<String> keywords2 = keywords == null
         ? Collections.emptySet()
         : Collections.unmodifiableSet(keywords);
@@ -58,17 +62,23 @@ class DialectImpl implements Dialect {
         break;
       }
     }
-    return new DialectImpl(keywords2, storesUpperCaseIdentifier,
-        dialect.getOneLineComments(), openQuote, closeQuote);
+    return new DialectImpl(keywords2, storesLowerCaseIdentifier,
+        storesUpperCaseIdentifier, dialect.getOneLineComments(),
+        openQuote, closeQuote, extraNameCharacters, dialect.getCodeBlocks());
   }
 
-  private DialectImpl(Set<String> keywords, boolean storesUpperCaseIdentifier,
-      Set<String> oneLineComments, char openQuote, char closeQuote) {
+  private DialectImpl(Set<String> keywords, boolean storesLowerCaseIdentifier,
+      boolean storesUpperCaseIdentifier, Set<String> oneLineComments,
+      char openQuote, char closeQuote, String extraNameCharacters,
+      CodeBlocks codeBlocks) {
     this.keywords = Objects.requireNonNull(keywords);
+    this.storesLowerCaseIdentifier = storesLowerCaseIdentifier;
     this.storesUpperCaseIdentifier = storesUpperCaseIdentifier;
     this.oneLineComments = oneLineComments;
     this.openQuote = openQuote;
     this.closeQuote = closeQuote;
+    this.extraNameCharacters = extraNameCharacters;
+    this.codeBlocks = codeBlocks;
   }
 
   public static Dialect getDefault() {
@@ -92,8 +102,20 @@ class DialectImpl implements Dialect {
     return closeQuote;
   }
 
+  @Override public boolean isLower() {
+    return storesLowerCaseIdentifier;
+  }
+
   @Override public boolean isUpper() {
     return storesUpperCaseIdentifier;
+  }
+
+  @Override public String getExtraNameCharacters() {
+    return extraNameCharacters;
+  }
+
+  @Override public CodeBlocks getCodeBlocks() {
+    return codeBlocks;
   }
 }
 

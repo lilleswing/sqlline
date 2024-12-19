@@ -61,11 +61,26 @@ public class PromptHandler {
 
   protected final SqlLine sqlLine;
 
-  static final Supplier<ScriptEngine> SCRIPT_ENGINE_SUPPLIER =
-      new MemoizingSupplier<>(() -> {
-        final ScriptEngineManager engineManager = new ScriptEngineManager();
-        return engineManager.getEngineByName("nashorn");
-      });
+  final Supplier<ScriptEngine> scriptEngineSupplier =
+      getEngineSupplier();
+
+  MemoizingSupplier<ScriptEngine> getEngineSupplier() {
+    return new MemoizingSupplier<>(() -> {
+      final ScriptEngineManager engineManager = new ScriptEngineManager();
+      String engineName = sqlLine.getOpts().get(BuiltInProperty.SCRIPT_ENGINE);
+      ScriptEngine scriptEngine = engineManager.getEngineByName(engineName);
+      if (scriptEngine == null) {
+        if (engineManager.getEngineFactories().isEmpty()) {
+          sqlLine.error(sqlLine.loc("not-supported-script-engine-no-available",
+              engineName));
+        } else {
+          sqlLine.error(sqlLine.loc("not-supported-script-engine",
+              engineName, BuiltInProperty.SCRIPT_ENGINE.getAvailableValues()));
+        }
+      }
+      return scriptEngine;
+    });
+  }
 
   public PromptHandler(SqlLine sqlLine) {
     this.sqlLine = sqlLine;
@@ -81,10 +96,12 @@ public class PromptHandler {
   }
 
   public AttributedString getPrompt() {
+    final int connectionIndex = sqlLine.getConnectionMetadata().getIndex();
     if (!sqlLine.getOpts().isDefault(BuiltInProperty.PROMPT_SCRIPT)) {
       final String promptScript =
           sqlLine.getOpts().get(BuiltInProperty.PROMPT_SCRIPT);
-      return getPromptFromScript(sqlLine, promptScript);
+      return getPrompt(sqlLine, connectionIndex,
+          getPromptFromScript(sqlLine, promptScript));
     }
     final String defaultPrompt =
         String.valueOf(BuiltInProperty.PROMPT.defaultValue());
@@ -92,38 +109,45 @@ public class PromptHandler {
     final DatabaseConnection dbc = sqlLine.getDatabaseConnection();
     final boolean useDefaultPrompt =
         sqlLine.getOpts().isDefault(BuiltInProperty.PROMPT);
+    final String prompt;
     if (dbc == null || dbc.getUrl() == null) {
-      return useDefaultPrompt
-          ? getDefaultPrompt(-1, null, defaultPrompt)
-          : getPrompt(sqlLine, -1, currentPrompt);
-    } else {
-      final int connectionIndex = sqlLine.getConnectionMetadata().getIndex();
-      if (useDefaultPrompt || dbc.getNickname() != null) {
-        final String nickNameOrUrl =
-            dbc.getNickname() == null ? dbc.getUrl() : dbc.getNickname();
-        return getDefaultPrompt(connectionIndex, nickNameOrUrl, defaultPrompt);
+      if (useDefaultPrompt) {
+        prompt = getDefaultPrompt(connectionIndex, null, defaultPrompt);
       } else {
-        return getPrompt(sqlLine, connectionIndex, currentPrompt);
+        prompt = currentPrompt;
       }
+    } else if (dbc.getNickname() != null) {
+      final String nickname = dbc.getNickname();
+      prompt = getDefaultPrompt(connectionIndex, nickname, defaultPrompt);
+    } else if (useDefaultPrompt) {
+      final String url = dbc.getUrl();
+      prompt = getDefaultPrompt(connectionIndex, url, defaultPrompt);
+    } else {
+      prompt = currentPrompt;
     }
+    return getPrompt(sqlLine, connectionIndex, prompt);
   }
 
-  private AttributedString getPromptFromScript(SqlLine sqlLine,
+  private String getPromptFromScript(SqlLine sqlLine,
       String promptScript) {
     try {
-      final ScriptEngine engine = SCRIPT_ENGINE_SUPPLIER.get();
-      final Bindings bindings = new SimpleBindings();
-      final ConnectionMetadata meta = sqlLine.getConnectionMetadata();
-      bindings.put("connectionIndex", meta.getIndex());
-      bindings.put("databaseProductName", meta.getDatabaseProductName());
-      bindings.put("userName", meta.getUserName());
-      bindings.put("url", meta.getUrl());
-      bindings.put("currentSchema", meta.getCurrentSchema());
-      final Object o = engine.eval(promptScript, bindings);
-      return new AttributedString(String.valueOf(o));
+      final ScriptEngine engine = scriptEngineSupplier.get();
+      if (engine == null) {
+        return ">";
+      } else {
+        final Bindings bindings = new SimpleBindings();
+        final ConnectionMetadata meta = sqlLine.getConnectionMetadata();
+        bindings.put("connectionIndex", meta.getIndex());
+        bindings.put("databaseProductName", meta.getDatabaseProductName());
+        bindings.put("userName", meta.getUserName());
+        bindings.put("url", meta.getUrl());
+        bindings.put("currentSchema", meta.getCurrentSchema());
+        final Object o = engine.eval(promptScript, bindings);
+        return String.valueOf(o);
+      }
     } catch (ScriptException e) {
       e.printStackTrace();
-      return new AttributedString(">");
+      return ">";
     }
   }
 
@@ -190,9 +214,9 @@ public class PromptHandler {
               int nextColonIndex = prompt.indexOf(":", i + 2);
               SqlLineProperty property;
               if (nextColonIndex > 0
-                  && ((property = BuiltInProperty.valueOf(
+                  && (property = BuiltInProperty.valueOf(
                   prompt.substring(i + 2, nextColonIndex),
-                  true)) != null)) {
+                  true)) != null) {
                 promptStringBuilder.append(opts.get(property));
                 i = nextColonIndex - 1;
                 break;
@@ -213,11 +237,11 @@ public class PromptHandler {
     return promptStringBuilder.toAttributedString();
   }
 
-  protected AttributedString getDefaultPrompt(
+  protected String getDefaultPrompt(
       int connectionIndex, String url, String defaultPrompt) {
     String resultPrompt;
     if (url == null || url.length() == 0) {
-      return new AttributedString(defaultPrompt);
+      return defaultPrompt;
     } else {
       if (url.contains(";")) {
         url = url.substring(0, url.indexOf(";"));
@@ -229,7 +253,7 @@ public class PromptHandler {
       if (resultPrompt.length() > 45) {
         resultPrompt = resultPrompt.substring(0, 45);
       }
-      return new AttributedString(resultPrompt + "> ");
+      return resultPrompt + "> ";
     }
   }
 

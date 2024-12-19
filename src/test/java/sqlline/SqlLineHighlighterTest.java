@@ -152,6 +152,7 @@ public class SqlLineHighlighterTest {
         "--select",
         "/* \"''\"",
         "/*",
+        "/*/ should be a comment",
         "--",
         "--\n/*",
         "/* kh\n'asd'ad*/",
@@ -238,7 +239,13 @@ public class SqlLineHighlighterTest {
     String[] linesRequiredToBeNumbers = {
         "123456789",
         "0123",
-        "1"
+        "1",
+        "2.1",
+        ".1",
+        ".2341",
+        "1e+1",
+        "1e-12",
+        "1.2E+12"
     };
 
     for (String line : linesRequiredToBeNumbers) {
@@ -322,6 +329,20 @@ public class SqlLineHighlighterTest {
     expectedStyle.defaults.set("!set".length(), line.indexOf("\"'\n\""));
     expectedStyle
         .sqlIdentifierQuotes.set(line.indexOf("\"'\n\""), line.length());
+    checkLineAgainstAllHighlighters(line, expectedStyle);
+
+    // !connect command with quoted arguments
+    line = "!connect \"jdbc:string\" admin 'pass \"word' driver";
+    expectedStyle = new ExpectedHighlightStyle(line.length());
+    expectedStyle.commands.set(0, "!connect".length());
+    expectedStyle.defaults.set(line.indexOf(" \"jdbc:string"));
+    expectedStyle.sqlIdentifierQuotes.set(
+        line.indexOf("\"jdbc:string"), line.indexOf(" admin"));
+    expectedStyle.defaults.set(
+        line.indexOf(" admin"), line.indexOf("'pass \"word'"));
+    expectedStyle.singleQuotes.set(
+        line.indexOf("'pass \"word'"), line.indexOf(" driver"));
+    expectedStyle.defaults.set(line.indexOf(" driver"), line.length());
     checkLineAgainstAllHighlighters(line, expectedStyle);
 
     // sql with !sql command
@@ -524,16 +545,21 @@ public class SqlLineHighlighterTest {
    */
   @Test
   public void testH2SqlKeywordsFromDatabase() {
-    // The list is taken from H2 1.4.197 getSQLKeywords output
+    // The list is taken from H2 2.0.206 getSQLKeywords output
+    // ("!metadata getSQLKeywords"). "KEY" and "_ROWID_" are also keywords.
     String[] linesRequiredToBeConnectionSpecificKeyWords = {
+        "CURRENT_CATALOG",
+        "CURRENT_SCHEMA",
+        "GROUPS",
+        "IF",
+        "ILIKE",
         "LIMIT",
         "MINUS",
         "OFFSET",
+        "QUALIFY",
+        "REGEXP",
         "ROWNUM",
-        "SYSDATE",
-        "SYSTIME",
-        "SYSTIMESTAMP",
-        "TODAY",
+        "TOP",
     };
 
     for (String line : linesRequiredToBeConnectionSpecificKeyWords) {
@@ -547,8 +573,6 @@ public class SqlLineHighlighterTest {
     for (Map.Entry<SqlLine, SqlLineHighlighter> sqlLine2HighLighterEntry
         : sqlLine2Highlighter.entrySet()) {
       SqlLine sqlLine = sqlLine2HighLighterEntry.getKey();
-      SqlLineHighlighter sqlLineHighlighter =
-          sqlLine2HighLighterEntry.getValue();
       sqlLine.runCommands(dc, "!connect "
           + SqlLineArgsTest.ConnectionSpec.H2.url + " "
           + SqlLineArgsTest.ConnectionSpec.H2.username + " \"\"");
@@ -760,13 +784,13 @@ public class SqlLineHighlighterTest {
     final AttributedString attributedString =
         highlighter.highlight(sqlLine.getLineReader(), line);
     final HighlightStyle highlightStyle = sqlLine.getHighlightStyle();
-    int commandStyle = highlightStyle.getCommandStyle().getStyle();
-    int keywordStyle = highlightStyle.getKeywordStyle().getStyle();
-    int singleQuoteStyle = highlightStyle.getQuotedStyle().getStyle();
-    int identifierStyle = highlightStyle.getIdentifierStyle().getStyle();
-    int commentStyle = highlightStyle.getCommentStyle().getStyle();
-    int numberStyle = highlightStyle.getNumberStyle().getStyle();
-    int defaultStyle = highlightStyle.getDefaultStyle().getStyle();
+    long commandStyle = highlightStyle.getCommandStyle().getStyle();
+    long keywordStyle = highlightStyle.getKeywordStyle().getStyle();
+    long singleQuoteStyle = highlightStyle.getQuotedStyle().getStyle();
+    long identifierStyle = highlightStyle.getIdentifierStyle().getStyle();
+    long commentStyle = highlightStyle.getCommentStyle().getStyle();
+    long numberStyle = highlightStyle.getNumberStyle().getStyle();
+    long defaultStyle = highlightStyle.getDefaultStyle().getStyle();
 
     for (int i = 0; i < line.length(); i++) {
       checkSymbolStyle(line, i, expectedHighlightStyle.commands,
@@ -798,7 +822,7 @@ public class SqlLineHighlighterTest {
       SqlLineHighlighter defaultHighlighter) {
     final AttributedString attributedString =
         defaultHighlighter.highlight(sqlLine.getLineReader(), line);
-    int defaultStyle = AttributedStyle.DEFAULT.getStyle();
+    long defaultStyle = AttributedStyle.DEFAULT.getStyle();
 
     for (int i = 0; i < line.length(); i++) {
       if (Character.isWhitespace(line.charAt(i))) {
@@ -837,7 +861,7 @@ public class SqlLineHighlighterTest {
       int i,
       BitSet styleBitSet,
       AttributedString highlightedLine,
-      int style,
+      long style,
       String styleName) {
     if (styleBitSet.get(i)) {
       assertEquals(i == 0 ? style + 32 : style,

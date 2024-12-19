@@ -36,6 +36,7 @@ import java.util.List;
 class BufferedRows extends Rows {
   private final ResultSet rs;
   private final Row columnNames;
+  private final Row columnTypes;
   private final int columnCount;
   private final int limit;
   private List<Row> list;
@@ -49,6 +50,7 @@ class BufferedRows extends Rows {
     limit = sqlLine.getOpts().getIncrementalBufferRows();
     columnCount = rsMeta.getColumnCount();
     columnNames = new Row(columnCount);
+    columnTypes = new Row(columnCount, rsMeta::getColumnTypeName);
     list = nextList();
     iterator = list.iterator();
   }
@@ -101,13 +103,22 @@ class BufferedRows extends Rows {
     if (batch == 0) {
       // Add a row of column names as the first row of the first batch.
       list.add(columnNames);
+      if (sqlLine.getOpts().getShowTypes()) {
+        list.add(columnTypes);
+      }
     }
-
-    if (limit >= 0 && batch == 0) {
+    if (rs.isClosed()) {
+      // Result set is closed. Perhaps the driver closed it automatically
+      // because we reached the end. Do nothing.
+    } else if (limit > 0) {
       // Obey the limit if the limit is non-negative and this is the first
       // batch.
       int counter = 0;
       while (counter++ < limit && rs.next()) {
+        list.add(new Row(columnCount, rs));
+      }
+    } else if (limit == 0) {
+      if (rs.next()) {
         list.add(new Row(columnCount, rs));
       }
     } else {

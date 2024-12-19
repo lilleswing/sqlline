@@ -13,6 +13,8 @@ package sqlline;
 
 import java.util.Arrays;
 import java.util.Set;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -41,7 +43,30 @@ interface Dialect {
 
   char getCloseQuote();
 
+  boolean isLower();
+
   boolean isUpper();
+
+  /**
+   * Retrieves all the "extra" characters that can be used
+   * in unquoted identifier names (those beyond a-z, A-Z, 0-9 and _).
+   *
+   * @return the string containing the extra characters
+   */
+  String getExtraNameCharacters();
+
+  CodeBlocks getCodeBlocks();
+
+  interface CodeBlocks {
+    default Predicate<String> isBlockStarting() {
+      return null;
+    }
+    Predicate<String> isBlockStarted();
+    default BiPredicate<String, String> isBlockEnding() {
+      return null;
+    }
+    BiPredicate<String, String> isBlockEnded();
+  }
 }
 
 // End Dialect.java
